@@ -64,7 +64,9 @@ extern void R36_LogLine(const char *fmt, ...);
     X(void, glUniform4f, (GLint, GLfloat, GLfloat, GLfloat, GLfloat)) X(void, glUniform4fv, (GLint, GLsizei, const GLfloat *)) \
     X(void, glUseProgram, (GLuint)) X(void, glVertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *)) \
     X(void, glVertexAttrib4f, (GLuint, GLfloat, GLfloat, GLfloat, GLfloat)) X(void, glViewport, (GLint, GLint, GLsizei, GLsizei)) \
-    X(void, glBindVertexArray, (GLuint)) X(void *, glMapBufferRange, (GLenum, GLintptr, GLsizeiptr, GLbitfield)) X(GLboolean, glUnmapBuffer, (GLenum))
+    X(void, glBindVertexArray, (GLuint)) X(void *, glMapBufferRange, (GLenum, GLintptr, GLsizeiptr, GLbitfield)) X(GLboolean, glUnmapBuffer, (GLenum)) \
+    X(GLsync, glFenceSync, (GLenum, GLbitfield)) X(GLenum, glClientWaitSync, (GLsync, GLbitfield, GLuint64)) X(void, glDeleteSync, (GLsync)) \
+    X(void, glBufferStorageEXT, (GLenum, GLsizeiptr, const void *, GLbitfield))
 #define X(r, n, p) static r(*p_##n) p;
 R36_REAL_LIST
 #undef X
@@ -1093,7 +1095,7 @@ static void dirty_(const uint8_t *p, size_t size) {
         }
     }
 }
-unsigned gR36Up[2];       /* (for the log) bytes and ranges given to the GPU from mapped buffers */
+unsigned gR36Up[3];       /* (for the log) bytes and ranges given to the GPU from mapped buffers */
 static int sNoUnsync = -1;
 static void flush_dirty(void) {
     int i, k, nb = 0;
@@ -1143,6 +1145,93 @@ static void flush_dirty(void) {
     }
     p_glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
 }
+
+/* ---- the stream: vertices and indices written once for one draw ----
+   The renderer's batches of GS primitives gave their vertices to the driver with glBufferData on one buffer, draw
+   after draw: on the TrimUI's PowerVR driver a costly call (a new store for the buffer each time, the old one kept
+   while the GPU reads it). Here they are copied into one large buffer mapped once for good (EXT_buffer_storage,
+   persistent and coherent; else mapped per piece without waiting), in three parts used a picture each in turn: a
+   part is written again only after the GPU has finished the picture that used it (a fence at each swap).
+   R36_STREAM=0: as before. */
+#define STREAM_PART (6u << 20)
+static GLuint sStreamBuf;
+static uint8_t *sStreamMap;   /* (persistent mapping, or NULL: mapped per piece) */
+static int sStreamOff = -1;   /* -1 not tried yet, 1 off */
+static unsigned sStreamPart, sStreamAt;
+static GLsync sStreamFence[3];
+static void stream_init(void) {
+    const char *e = getenv("R36_STREAM");
+    sStreamOff = e != NULL && atoi(e) == 0;
+    if (sStreamOff || p_glFenceSync == NULL || p_glClientWaitSync == NULL) {
+        sStreamOff = 1;
+        return;
+    }
+    p_glGenBuffers(1, &sStreamBuf);
+    p_glBindBuffer(GL_COPY_WRITE_BUFFER, sStreamBuf);
+    if (p_glBufferStorageEXT != NULL) {
+        p_glBufferStorageEXT(GL_COPY_WRITE_BUFFER, STREAM_PART * 3, NULL, GL_MAP_WRITE_BIT | 0x0040 /* PERSISTENT */ | 0x0080 /* COHERENT */);
+        if (p_glGetError() == GL_NO_ERROR) {
+            sStreamMap = (uint8_t *)p_glMapBufferRange(GL_COPY_WRITE_BUFFER, 0, STREAM_PART * 3, GL_MAP_WRITE_BIT | 0x0040 | 0x0080);
+        }
+    }
+    if (sStreamMap == NULL) {
+        p_glGetError();
+        p_glBufferData(GL_COPY_WRITE_BUFFER, STREAM_PART * 3, NULL, GL_DYNAMIC_DRAW);
+    }
+    p_glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+    R36_LogLine("r36 gl: the stream: %u MB in 3 parts, %s\n", (STREAM_PART * 3) >> 20, sStreamMap != NULL ? "mapped for good" : "mapped per piece");
+}
+/* (at a swap) this part done: a fence after it; the next one waited for if the GPU still reads it */
+static void stream_next(void) {
+    if (sStreamOff != 0 || sStreamBuf == 0) {
+        return;
+    }
+    if (sStreamFence[sStreamPart] != NULL) {
+        p_glDeleteSync(sStreamFence[sStreamPart]);
+    }
+    sStreamFence[sStreamPart] = p_glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    sStreamPart = (sStreamPart + 1) % 3;
+    sStreamAt = 0;
+    if (sStreamFence[sStreamPart] != NULL) {
+        p_glClientWaitSync(sStreamFence[sStreamPart], GL_SYNC_FLUSH_COMMANDS_BIT, 100000000ull);
+        p_glDeleteSync(sStreamFence[sStreamPart]);
+        sStreamFence[sStreamPart] = NULL;
+    }
+}
+/* copies n bytes into the stream: its offset in the stream buffer (R36_StreamBuf), or -1 (no room: the caller's
+   own way) */
+GLuint R36_StreamBuf(void) { return sStreamBuf; }
+long R36_Stream(const void *data, size_t n) {
+    long at;
+    ENTER_R(-1);
+    if (sStreamOff < 0) {
+        stream_init();
+    }
+    if (sStreamOff != 0 || n == 0 || sStreamAt + n + 16 > STREAM_PART) {
+        LEAVE();
+        return -1;
+    }
+    at = (long)(sStreamPart * STREAM_PART + sStreamAt);
+    if (sStreamMap != NULL) {
+        memcpy(sStreamMap + at, data, n);
+    } else {
+        void *dst;
+        p_glBindBuffer(GL_COPY_WRITE_BUFFER, sStreamBuf);
+        dst = p_glMapBufferRange(GL_COPY_WRITE_BUFFER, at, (GLsizeiptr)n, GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+        if (dst != NULL) {
+            memcpy(dst, data, n);
+            p_glUnmapBuffer(GL_COPY_WRITE_BUFFER);
+        } else {
+            p_glBufferSubData(GL_COPY_WRITE_BUFFER, at, (GLsizeiptr)n, data);
+        }
+        p_glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+    }
+    sStreamAt = (sStreamAt + (unsigned)n + 15u) & ~15u;
+    gR36Up[2] += (unsigned)n;
+    LEAVE();
+    return at;
+}
+GLuint R36_ElemBuf(void) { return sElemBuf; }
 
 /* ---- vertex attributes ---- */
 void r36_glEnableVertexAttribArray(GLuint i) {
@@ -1292,8 +1381,16 @@ void vglFastDrawPtr(GLenum type, const void *idx, uint32_t count, const void *vu
     if (p != NULL && p->u >= 0) {
         p_glUniform4fv(p->u, (GLsizei)(size / 16u), (const GLfloat *)vunif);
     }
-    r_bind(GL_ELEMENT_ARRAY_BUFFER, 0); /* (indices in main memory; the renderer's own put back at the next draw that needs it) */
-    p_glDrawElements(GL_TRIANGLES, (GLsizei)count, type, idx);
+    {   /* (the indices into the stream, else from main memory; the renderer's own put back at the next draw that needs it) */
+        long at = R36_Stream(idx, (size_t)count * (type == GL_UNSIGNED_INT ? 4u : type == GL_UNSIGNED_BYTE ? 1u : 2u));
+        if (at >= 0) {
+            r_bind(GL_ELEMENT_ARRAY_BUFFER, sStreamBuf);
+            p_glDrawElements(GL_TRIANGLES, (GLsizei)count, type, (const void *)(uintptr_t)at);
+        } else {
+            r_bind(GL_ELEMENT_ARRAY_BUFFER, 0);
+            p_glDrawElements(GL_TRIANGLES, (GLsizei)count, type, idx);
+        }
+    }
     LEAVE();
 }
 uint32_t vglFastVertUniformSize(GLuint prog) { return (int)prog < sProgCap ? sProg[prog].usize : 0; }
@@ -1429,6 +1526,7 @@ void vglSwapBuffers(GLboolean has_commondialog) {
     unsigned done = gxm_back_buffer_index % NDISP;
     (void)has_commondialog;
     flush_dirty();
+    stream_next();
     if (sDisplayCb != NULL) {
         sDisplayCb(gxm_color_surfaces_addr[done]); /* (the renderer's pacing: it may wait for its blank here) */
     }

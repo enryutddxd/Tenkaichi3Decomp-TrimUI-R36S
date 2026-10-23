@@ -2885,6 +2885,38 @@ static void flush_impl(const FlushIn *in) {
             gVglBatches++;
             return;
         }
+#ifdef PORT_R36S
+        {   /* (port/r36s/shim/r36s_gl.c) the vertices, and the indices, into the stream: no glBufferData per draw */
+            extern long R36_Stream(const void *data, size_t n);
+            extern GLuint R36_StreamBuf(void), R36_ElemBuf(void);
+            long vo = R36_Stream(in->verts, (size_t)in->vertCount * sizeof(V)), io = 0;
+            if (vo >= 0 && in->idx != NULL) {
+                io = R36_Stream(in->idx, (size_t)in->idxCount * 2u);
+            }
+            if (vo >= 0 && io >= 0) {
+                GLuint sb = R36_StreamBuf();
+                glBindBuffer(GL_ARRAY_BUFFER, sb);
+                glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(V), (const void *)(uintptr_t)(vo + 0));
+                glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(V), (const void *)(uintptr_t)(vo + 28));
+                glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(V), (const void *)(uintptr_t)(vo + 16));
+                ZM(38);
+                if (in->idx != NULL) {
+                    GLuint prev = R36_ElemBuf();
+                    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sb);
+                    glDrawElements(GL_TRIANGLES, in->idxCount, GL_UNSIGNED_SHORT, (const void *)(uintptr_t)io);
+                    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, prev);
+                } else {
+                    glDrawArrays(s->topo ? GL_LINES : GL_TRIANGLES, 0, in->vertCount);
+                }
+                ZM(39);
+                glBindBuffer(GL_ARRAY_BUFFER, 0);
+                if (sLogFrames > 0) {
+                    Vita_Log("vgl: batch %u given to vitaGL\n", gVglBatches);
+                }
+                goto streamed;
+            }
+        }
+#endif
         if (!(gVglSafe & 256)) { /* one copy of the vertices into a buffer of the chip's (else vitaGL copies per attribute) */
             static GLuint vbo;
             if (vbo == 0) {
@@ -2908,6 +2940,9 @@ static void flush_impl(const FlushIn *in) {
         if (sLogFrames > 0) {
             Vita_Log("vgl: batch %u given to vitaGL\n", gVglBatches);
         }
+#ifdef PORT_R36S
+    streamed:
+#endif
         gVglBatches++;
         return;
     }
