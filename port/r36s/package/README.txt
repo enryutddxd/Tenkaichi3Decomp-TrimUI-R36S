@@ -32,7 +32,7 @@ Si algo falla, mándame estos archivos de ports/bt3/:
 Ajustes opcionales en ports/bt3/bt3.txt (una línea por ajuste):
   res=480x360     dibujar las peleas a menor resolución (más rápido)
   vsync=0         sin esperar el refresco de pantalla
-  pin=0           no fijar los hilos del juego a núcleos concretos
+  pin=1           fijar los hilos del juego a núcleos concretos (como en la Vita)
 
 ENGLISH
 -------

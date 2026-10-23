@@ -31,6 +31,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <malloc.h>
+#ifdef PORT_R36S
+#include <unistd.h>
+#endif
 #include "debugScreen.h"
 
 #ifdef PORT_R36S /* the R36S: the folder the program is started in (port/r36s/package: ports/bt3) */
@@ -224,6 +227,22 @@ static void log_put(const char *p, unsigned n) {
     }
     __sync_lock_release(&sLogLock);
 }
+#ifdef PORT_R36S
+/* (a crash, port/r36s/shim/r36s_psp2.c) the lines not on the card yet, as they are: no lock taken */
+void Vita_CrashLog(int fd) {
+    unsigned t = sLogTail, h = sLogHead;
+    if (h - t > sizeof(sLogBuf)) {
+        t = h - (unsigned)sizeof(sLogBuf);
+    }
+    while (t != h) {
+        unsigned at = t % sizeof(sLogBuf), n = h - t < sizeof(sLogBuf) - at ? h - t : sizeof(sLogBuf) - at;
+        if (write(fd, sLogBuf + at, n) <= 0) {
+            break;
+        }
+        t += n;
+    }
+}
+#endif
 static void log_sync(void) {
     unsigned h, t;
     while (__sync_lock_test_and_set(&sLogDrainLock, 1)) {
@@ -1429,7 +1448,7 @@ int __wrap_main(int argc, char **argv) {
             sceIoRemove(path);
         }
     }
-#ifdef PORT_VITA_RELEASE
+#if defined(PORT_VITA_RELEASE) && !defined(PORT_R36S) /* (the R36S's test builds: the figures every two seconds in the log) */
     gVitaReport = 0;
     logf_("vita: Dragon Ball Z Budokai Tenkaichi 3 (Tenkaichi3Decomp) for the PS Vita, built " __DATE__ " " __TIME__ ", processor clock %d MHz\n", scePowerGetArmClockFrequency());
 #else

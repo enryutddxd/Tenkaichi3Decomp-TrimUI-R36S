@@ -48,7 +48,14 @@ $GPTOKEYB "bt3" &
 if type pm_platform_helper >/dev/null 2>&1; then
   pm_platform_helper "$GAMEDIR/bt3"
 fi
+free -m 2>/dev/null | head -2
 ./bt3
+STATUS=$?
+echo "bt3 ended: status $STATUS (137: stopped by the system, out of memory?; 139: crash; 135: bus error)"
+free -m 2>/dev/null | head -2
+if [ $STATUS -ge 128 ]; then
+  $ESUDO dmesg 2>/dev/null | tail -40
+fi
 
 $ESUDO kill -9 $(pidof gptokeyb) 2>/dev/null
 for g in $GOVS; do

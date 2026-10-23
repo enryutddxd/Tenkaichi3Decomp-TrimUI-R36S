@@ -87,7 +87,7 @@ static void pin(pthread_t pt, int mask) {
     int c, any = 0;
     if (sPin < 0) {
         const char *e = getenv("R36_PIN");
-        sPin = e == NULL || atoi(e) != 0;
+        sPin = e != NULL && atoi(e) != 0; /* (off unless pin=1: the system places the threads) */
     }
     if (!sPin || mask == 0) {
         return;
@@ -720,7 +720,7 @@ int sceAudioOutOutput(int port, const void *buf) {
         sceKernelDelayThread((SceUInt)((unsigned long long)sLen * 1000000ull / 48000ull));
         return 0;
     }
-    while (SDL_GetQueuedAudioSize(sDev) > bytes * 2u) {
+    while (SDL_GetQueuedAudioSize(sDev) > bytes * 4u) {
         SDL_Delay(2);
     }
     if (buf != NULL) {
@@ -731,44 +731,102 @@ int sceAudioOutOutput(int port, const void *buf) {
 int sceAudioOutSetVolume(int port, int flag, int *vol) { (void)port; (void)flag; (void)vol; return 0; }
 int sceAudioOutSetConfig(int port, SceSize len, int freq, SceAudioOutMode mode) { (void)port; (void)freq; (void)mode; sLen = (int)len; return 0; }
 
-/* ---- a crash: where, into crash.txt (and the log), for the program's map (port/build/r36s/bt3.unstripped) ---- */
+/* ---- a crash: where, into crash.txt (and the log), for the program's map (port/build/r36s/bt3.unstripped) ----
+   Written piece by piece with write(): the registers first, then the calls found on the thread's own stack (within
+   its bounds, recorded when the thread started), then the last lines of the log that were not on the card yet. Every
+   thread gets a stack of its own for the handler (a crash from a full stack still reports). */
 extern char __executable_start[], etext[];
+static __thread uintptr_t tStackLo, tStackHi;
+static void stack_note(void) {
+    pthread_attr_t a;
+    void *lo = NULL;
+    size_t size = 0;
+    if (pthread_getattr_np(pthread_self(), &a) == 0) {
+        pthread_attr_getstack(&a, &lo, &size);
+        pthread_attr_destroy(&a);
+        tStackLo = (uintptr_t)lo;
+        tStackHi = (uintptr_t)lo + size;
+    }
+}
+static void alt_stack(void) {
+    stack_t ss;
+    ss.ss_sp = malloc(65536);
+    ss.ss_size = 65536;
+    ss.ss_flags = 0;
+    if (ss.ss_sp != NULL) {
+        sigaltstack(&ss, NULL);
+    }
+    stack_note();
+}
+/* every pthread made (the renderer's, SDL's, ours) starts here first: build.py links pthread_create through this */
+typedef struct Tramp { void *(*fn)(void *); void *arg; } Tramp;
+static void *tramp(void *p) {
+    Tramp t = *(Tramp *)p;
+    free(p);
+    alt_stack();
+    return t.fn(t.arg);
+}
+extern int __real_pthread_create(pthread_t *th, const pthread_attr_t *attr, void *(*fn)(void *), void *arg);
+int __wrap_pthread_create(pthread_t *th, const pthread_attr_t *attr, void *(*fn)(void *), void *arg) {
+    Tramp *t = (Tramp *)malloc(sizeof(Tramp));
+    if (t == NULL) {
+        return __real_pthread_create(th, attr, fn, arg);
+    }
+    t->fn = fn;
+    t->arg = arg;
+    return __real_pthread_create(th, attr, tramp, t);
+}
+static void put(int fd, const char *b, int n) {
+    if (fd >= 0 && n > 0) {
+        ssize_t w = write(fd, b, (size_t)n);
+        (void)w;
+    }
+}
+extern void Vita_CrashLog(int fd); /* port/vita/vita_main.c (R36S): the log's lines not yet written */
+static volatile int sCrashed;
 static void crash(int sig, siginfo_t *si, void *ctx) {
-    char b[3000];
-    int n = 0, fd, i, k = 0;
+    char b[1600];
+    int n = 0, fd, k = 0;
     ucontext_t *uc = (ucontext_t *)ctx;
     const mcontext_t *m = &uc->uc_mcontext;
+    if (__sync_lock_test_and_set(&sCrashed, 1)) { /* (a second thread crashing meanwhile: waits to be ended) */
+        for (;;) {
+            pause();
+        }
+    }
+    fd = open("crash.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
 #ifdef __arm__
-    const unsigned long *sp = (const unsigned long *)m->arm_sp;
-    n += snprintf(b + n, sizeof(b) - (size_t)n, "r36: CRASH: signal %d (%s), address %p, thread %d\n  pc %08lx lr %08lx sp %08lx fp %08lx\n"
-                  "  r0 %08lx r1 %08lx r2 %08lx r3 %08lx r4 %08lx r5 %08lx r6 %08lx r7 %08lx\n  r8 %08lx r9 %08lx r10 %08lx ip %08lx cpsr %08lx\n  stack:",
-                  sig, sig == SIGSEGV ? "SEGV" : sig == SIGBUS ? "BUS" : sig == SIGILL ? "ILL" : sig == SIGFPE ? "FPE" : sig == SIGABRT ? "ABRT" : "?",
-                  si->si_addr, sceKernelGetThreadId(), m->arm_pc, m->arm_lr, m->arm_sp, m->arm_fp, m->arm_r0, m->arm_r1, m->arm_r2, m->arm_r3,
-                  m->arm_r4, m->arm_r5, m->arm_r6, m->arm_r7, m->arm_r8, m->arm_r9, m->arm_r10, m->arm_ip, m->arm_cpsr);
-    /* the words on the stack that point into the program's code: the calls that led here, most likely */
-    for (i = 0; i < 2048 && k < 40 && n < (int)sizeof(b) - 16; i++) {
-        unsigned long w = sp[i];
-        if (w >= (unsigned long)__executable_start && w < (unsigned long)etext) {
-            n += snprintf(b + n, sizeof(b) - (size_t)n, " %08lx", w);
-            k++;
+    n = snprintf(b, sizeof(b), "r36: CRASH: signal %d (%s), address %p, thread %d\n  pc %08lx lr %08lx sp %08lx fp %08lx\n"
+                 "  r0 %08lx r1 %08lx r2 %08lx r3 %08lx r4 %08lx r5 %08lx r6 %08lx r7 %08lx\n  r8 %08lx r9 %08lx r10 %08lx ip %08lx cpsr %08lx\n",
+                 sig, sig == SIGSEGV ? "SEGV" : sig == SIGBUS ? "BUS" : sig == SIGILL ? "ILL" : sig == SIGFPE ? "FPE" : sig == SIGABRT ? "ABRT" : "?",
+                 si->si_addr, tId, m->arm_pc, m->arm_lr, m->arm_sp, m->arm_fp, m->arm_r0, m->arm_r1, m->arm_r2, m->arm_r3,
+                 m->arm_r4, m->arm_r5, m->arm_r6, m->arm_r7, m->arm_r8, m->arm_r9, m->arm_r10, m->arm_ip, m->arm_cpsr);
+    put(fd, b, n);
+    put(2, b, n);
+    n = snprintf(b, sizeof(b), "  stack %08lx..%08lx, calls:", (unsigned long)tStackLo, (unsigned long)tStackHi);
+    if (tStackHi != 0 && m->arm_sp >= tStackLo && m->arm_sp < tStackHi) {
+        const unsigned long *sp = (const unsigned long *)m->arm_sp, *end = (const unsigned long *)tStackHi;
+        for (; sp < end && k < 48 && n < (int)sizeof(b) - 16; sp++) {
+            unsigned long w = *sp;
+            if (w >= (unsigned long)__executable_start && w < (unsigned long)etext) {
+                n += snprintf(b + n, sizeof(b) - (size_t)n, " %08lx", w);
+                k++;
+            }
         }
     }
     n += snprintf(b + n, sizeof(b) - (size_t)n, "\n");
+    put(fd, b, n);
+    put(2, b, n);
 #else
-    (void)m;
-    n += snprintf(b + n, sizeof(b) - (size_t)n, "r36: CRASH: signal %d, address %p\n", sig, si->si_addr);
+    (void)m; (void)k;
+    n = snprintf(b, sizeof(b), "r36: CRASH: signal %d, address %p\n", sig, si->si_addr);
+    put(fd, b, n);
 #endif
-    fd = open("crash.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
+    put(fd, "  the log's last lines:\n", 24);
+    Vita_CrashLog(fd);
     if (fd >= 0) {
-        ssize_t w = write(fd, b, (size_t)n);
-        (void)w;
         close(fd);
     }
-    {
-        ssize_t w = write(2, b, (size_t)n);
-        (void)w;
-    }
-    Vita_Log("%s", b);
     signal(sig, SIG_DFL);
     raise(sig);
 }
@@ -779,9 +837,7 @@ static void term(int sig) {
 }
 __attribute__((constructor)) static void crash_init(void) {
     struct sigaction sa;
-    static char alt[65536];
-    stack_t ss = {alt, 0, sizeof(alt)};
-    sigaltstack(&ss, NULL);
+    alt_stack();
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = crash;
     sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
@@ -789,6 +845,7 @@ __attribute__((constructor)) static void crash_init(void) {
     sigaction(SIGBUS, &sa, NULL);
     sigaction(SIGILL, &sa, NULL);
     sigaction(SIGFPE, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
     signal(SIGTERM, term);
     signal(SIGINT, term);
     signal(SIGHUP, term);
