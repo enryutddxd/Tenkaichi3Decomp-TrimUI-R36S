@@ -440,6 +440,9 @@ void Vita_VBlank(unsigned vblanks) {
         if ((int)(vc - nextVc) > 2) { /* (more than two blanks late: the grid moves along with the game) */
             nextVc = vc - 2;
         }
+        if ((int)(vc - nextVc) < -8) { /* (the grid far ahead of the clock: a clock that jumped; back onto it) */
+            nextVc = vc;
+        }
         if ((int)(vc - nextVc) < 0) {
             extern volatile unsigned char gProfGame;
             gProfGame = 1;

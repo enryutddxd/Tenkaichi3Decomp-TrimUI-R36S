@@ -99,7 +99,14 @@ static void clk_init(void) {
         const char *e = getenv("R36_CLOCK");
         clock_gettime(CLOCK_MONOTONIC, &sT0);
 #if defined(__arm__) || defined(__aarch64__)
+        /* (64 bits, the TrimUI's Allwinner A133: its counter is read wrong now and then, a jump far ahead (the
+           A64's timer erratum, which the kernel works around and a program cannot): the game's pacing then waited
+           for that time to come. clock_gettime there; R36_CLOCK=1 the counter anyway) */
+#ifdef __aarch64__
+        if (e != NULL && atoi(e) != 0) {
+#else
         if (e == NULL || atoi(e) != 0) {
+#endif
             struct sigaction sa, old;
             memset(&sa, 0, sizeof(sa));
             sa.sa_handler = cnt_ill;
