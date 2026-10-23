@@ -16,6 +16,8 @@ The game's code and the Vita's own sources are compiled as they are (the few R36
 | `package/` | The launcher for ArkOS / PortMaster and the player's README |
 | `tests/shader_check.py` | Every shader of vita_vgl.c translated and checked with glslangValidator |
 | `tests/gl_test.sh` | The GL layer on the build machine (Mesa in Xvfb), pixels read back |
+| `shim/r36s_prof.c` | prof.txt: a sampling profiler per thread (every 10 s), with the system's counts |
+| `HANDOFF.md` | The state of the work, what was tried and measured, what is left |
 
 ## Building
 
@@ -23,7 +25,7 @@ On Linux (x86-64), no SDL2, GLES or ARM sysroot needed:
 
 ```sh
 pip install ziglang libclang            # the compiler (glibc 2.28 for armhf) and the bindings ptr32.py uses
-sudo apt install binutils-arm-linux-gnueabihf zip
+sudo apt install binutils-arm-linux-gnueabihf gcc-arm-linux-gnueabihf zip   # (GCC: the renderer's files, see build.py; BT3_GCC=0 without it)
 python3 port/r36s/build.py              # compile, link, package
 ```
 
@@ -35,7 +37,7 @@ The result is `port/build/r36s/Tenkaichi3Decomp-R36S.zip` (the `ports/` folder o
 
 - Pictures at 640 x 480 (the screen's own), 4:3; `res=WxH` in bt3.txt for the fights.
 - Textures with a palette are converted to colours (OpenGL ES has no palette textures).
-- The draws are made on the drawing thread itself (the Vita's separate render thread is off: a GL context belongs to
-  one thread).
+- The draws are made on the drawing thread itself (the Vita's separate render thread: bt3.txt rt=1, see HANDOFF.md).
+- The direct path's model parts are drawn several to a draw (gl_VertexID slots; R36_BATCH=0: one by one).
 - The picture is not handed to the GPU in parts (vglSplitScene); the renderer reads the display through its copies.
 - No touch panels: L2 / R2 are the R36S's own; L3 / R3 the sticks pressed, or SELECT + L1 / R1.
