@@ -273,6 +273,19 @@ static void *drawer(void *arg) {
         CHECK(vglFastPrepare(GL_UNSIGNED_SHORT), "vglFastPrepare");
         vglFastDraw(GL_UNSIGNED_SHORT, 0, 6, U, usize);
         CHECK(px_at(320, 240) == RED, "vglFastDraw: red over the screen: %08x", px_at(320, 240));
+        /* indices in main memory (vglFastDrawPtr), then the element buffer's again: the left half black, then red over all */
+        {
+            static const uint16_t kLeft[3] = {0, 2, 1};
+            static uint32_t blue[4][8];
+            for (int i = 0; i < 4; i++) { blue[i][0] = 0x80800000u; }
+            glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, 32, &blue[0][0]);
+            vglFastDrawPtr(GL_UNSIGNED_SHORT, kLeft, 3, U, usize);
+            CHECK(px_at(5, 475) == BLUE, "vglFastDrawPtr: blue at the bottom left: %08x", px_at(5, 475));
+            CHECK(px_at(635, 5) == RED, "vglFastDrawPtr: top right still red: %08x", px_at(635, 5));
+            glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, 32, &verts[0][6]);
+            vglFastDraw(GL_UNSIGNED_SHORT, 0, 6, U, usize);
+            CHECK(px_at(5, 475) == RED, "vglFastDraw after it: red again (its element buffer): %08x", px_at(5, 475));
+        }
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     }
 

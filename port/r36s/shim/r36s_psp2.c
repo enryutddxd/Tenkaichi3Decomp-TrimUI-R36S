@@ -43,15 +43,102 @@ void R36_LogLine(const char *fmt, ...) {
     Vita_Log("%s", line);
 }
 
-/* ---- the clock ---- */
+/* ---- the clock ----
+   The processor's own counter (the ARM generic timer, CNTVCT, 24 MHz on the RK3326), read straight from the program:
+   clock_gettime is a system call on the R36S (its 64-bit kernel has no fast path for 32-bit programs), a microsecond
+   or more each, and the renderer asks the time thousands of times a picture. Tried once at the start (an instruction
+   the kernel may not allow: SIGILL caught) and checked against clock_gettime; else clock_gettime as before. */
+#include <setjmp.h>
 static struct timespec sT0;
-static pthread_once_t sOnce = PTHREAD_ONCE_INIT;
-static void t0_init(void) { clock_gettime(CLOCK_MONOTONIC, &sT0); }
-unsigned long long sceKernelGetProcessTimeWide(void) {
+static volatile int sClk; /* 0 not yet, 1 the counter, 2 clock_gettime */
+static uint64_t sCnt0;
+static uint32_t sCntMul; /* microseconds per tick << 32 */
+static uint64_t sNsMul;  /* nanoseconds per tick << 32 */
+static sigjmp_buf sCntJb;
+static void cnt_ill(int sig) { (void)sig; siglongjmp(sCntJb, 1); }
+static inline uint64_t cnt_read(void) {
+#ifdef __arm__
+    uint64_t v;
+    __asm__ volatile("mrrc p15, 1, %Q0, %R0, c14" : "=r"(v));
+    return v;
+#else
+    return 0;
+#endif
+}
+static uint64_t mono_ns(void) {
     struct timespec t;
-    pthread_once(&sOnce, t0_init);
     clock_gettime(CLOCK_MONOTONIC, &t);
-    return (unsigned long long)(t.tv_sec - sT0.tv_sec) * 1000000ull + (unsigned long long)((t.tv_nsec - sT0.tv_nsec) / 1000);
+    return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
+}
+static pthread_mutex_t sClkLock = PTHREAD_MUTEX_INITIALIZER;
+static void clk_init(void) {
+    pthread_mutex_lock(&sClkLock);
+    if (sClk == 0) {
+        volatile int ok = 0;
+        const char *e = getenv("R36_CLOCK");
+        clock_gettime(CLOCK_MONOTONIC, &sT0);
+#ifdef __arm__
+        if (e == NULL || atoi(e) != 0) {
+            struct sigaction sa, old;
+            memset(&sa, 0, sizeof(sa));
+            sa.sa_handler = cnt_ill;
+            sigaction(SIGILL, &sa, &old);
+            if (sigsetjmp(sCntJb, 1) == 0) {
+                uint64_t c0, c1, n0, n1;
+                struct timespec d = {0, 20000000L};
+                c0 = cnt_read();
+                n0 = mono_ns();
+                nanosleep(&d, NULL);
+                c1 = cnt_read();
+                n1 = mono_ns();
+                if (c1 > c0 && n1 > n0) {
+                    double hz = (double)(c1 - c0) * 1e9 / (double)(n1 - n0);
+                    /* (the counter's rate rounded to a whole kHz; 1 to 200 MHz) */
+                    if (hz > 1e6 && hz < 2e8) {
+                        double khz = (double)(uint64_t)(hz / 1000.0 + 0.5);
+                        sCntMul = (uint32_t)(4294967296.0 * 1000.0 / khz);
+                        sNsMul = (uint64_t)(4294967296.0 * 1000000.0 / khz);
+                        sCnt0 = c0 - (uint64_t)((double)(n0 - ((uint64_t)sT0.tv_sec * 1000000000ull + (uint64_t)sT0.tv_nsec)) * khz / 1e6);
+                        ok = 1;
+                        R36_LogLine("r36: the clock from the processor's counter, %.0f kHz\n", khz);
+                    }
+                }
+            }
+            sigaction(SIGILL, &old, NULL);
+        }
+#endif
+        if (!ok) {
+            R36_LogLine("r36: the clock from clock_gettime\n");
+        }
+        __sync_synchronize();
+        sClk = ok ? 1 : 2;
+    }
+    pthread_mutex_unlock(&sClkLock);
+}
+/* ticks * mul >> 32, without losing the top */
+static inline uint64_t mul32(uint64_t d, uint64_t mul) {
+    return (d >> 32) * mul + (((d & 0xFFFFFFFFull) * (mul & 0xFFFFFFFFull)) >> 32) + (d & 0xFFFFFFFFull) * (mul >> 32);
+}
+unsigned long long sceKernelGetProcessTimeWide(void) {
+    if (__builtin_expect(sClk == 1, 1)) {
+        return mul32(cnt_read() - sCnt0, sCntMul);
+    }
+    if (sClk == 0) {
+        clk_init();
+        return sceKernelGetProcessTimeWide();
+    }
+    return (mono_ns() - ((uint64_t)sT0.tv_sec * 1000000000ull + (uint64_t)sT0.tv_nsec)) / 1000ull;
+}
+/* nanoseconds on the same clock (r36s_gl.c's call times) */
+unsigned long long R36_NowNs(void) {
+    if (__builtin_expect(sClk == 1, 1)) {
+        return mul32(cnt_read() - sCnt0, sNsMul);
+    }
+    if (sClk == 0) {
+        clk_init();
+        return R36_NowNs();
+    }
+    return mono_ns();
 }
 unsigned int sceKernelGetProcessTimeLow(void) { return (unsigned int)sceKernelGetProcessTimeWide(); }
 int sceKernelDelayThread(SceUInt delay) {

@@ -69,6 +69,70 @@ extern void R36_LogLine(const char *fmt, ...);
 R36_REAL_LIST
 #undef X
 
+/* ---- the state as the driver has it: a call that would set what is already set is left out (the renderer sets
+   the same buffer, attribute pointers and program again and again: some 30000 calls a second into the driver) ---- */
+#define R_UNK 0xFFFFFFFFu
+typedef struct RAttr { GLuint buf; GLint size; GLenum type; GLboolean norm; GLsizei stride; const void *ptr; signed char valid, on; } RAttr;
+static GLuint rBuf[2] = {R_UNK, R_UNK}, rProg = R_UNK, rFbo = R_UNK;
+static RAttr rAt[8];
+static void r_forget(void) {
+    int i;
+    rBuf[0] = rBuf[1] = rProg = rFbo = R_UNK;
+    for (i = 0; i < 8; i++) {
+        rAt[i].valid = 0;
+        rAt[i].on = -1;
+    }
+}
+__attribute__((constructor)) static void r_init(void) { r_forget(); }
+static inline void r_bind(GLenum t, GLuint b) {
+    int k = t == GL_ARRAY_BUFFER ? 0 : t == GL_ELEMENT_ARRAY_BUFFER ? 1 : -1;
+    if (k < 0) {
+        p_glBindBuffer(t, b);
+    } else if (rBuf[k] != b) {
+        p_glBindBuffer(t, b);
+        rBuf[k] = b;
+    }
+}
+static inline void r_vap(GLuint i, GLint size, GLenum type, GLboolean norm, GLsizei stride, const void *ptr) {
+    RAttr *a;
+    if (i >= 8) {
+        p_glVertexAttribPointer(i, size, type, norm, stride, ptr);
+        return;
+    }
+    a = &rAt[i];
+    if (a->valid && a->buf == rBuf[0] && a->size == size && a->type == type && a->norm == norm && a->stride == stride && a->ptr == ptr) {
+        return;
+    }
+    p_glVertexAttribPointer(i, size, type, norm, stride, ptr);
+    a->valid = rBuf[0] != R_UNK;
+    a->buf = rBuf[0]; a->size = size; a->type = type; a->norm = norm; a->stride = stride; a->ptr = ptr;
+}
+static inline void r_attr_on(GLuint i, int on) {
+    if (i < 8 && rAt[i].on == on) {
+        return;
+    }
+    if (on) {
+        p_glEnableVertexAttribArray(i);
+    } else {
+        p_glDisableVertexAttribArray(i);
+    }
+    if (i < 8) {
+        rAt[i].on = (signed char)on;
+    }
+}
+static inline void r_use(GLuint p) {
+    if (rProg != p) {
+        p_glUseProgram(p);
+        rProg = p;
+    }
+}
+static inline void r_fbo(GLuint f) {
+    if (rFbo != f) {
+        p_glBindFramebuffer(GL_FRAMEBUFFER, f);
+        rFbo = f;
+    }
+}
+
 /* ---- the window and the context ---- */
 static SDL_Window *sWin;
 static SDL_GLContext sCtx;
@@ -170,11 +234,8 @@ typedef struct GlT { const char *name; unsigned long long ns, max; unsigned n, s
 static GlT sGlT[GLT_MAX], sGlTPrev[GLT_MAX];
 static int sGlTn;
 static pthread_mutex_t sGlTLock = PTHREAD_MUTEX_INITIALIZER;
-static inline unsigned long long glt_now(void) {
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (unsigned long long)t.tv_sec * 1000000000ull + (unsigned long long)t.tv_nsec;
-}
+unsigned long long R36_NowNs(void); /* (r36s_psp2.c: the processor's counter) */
+#define glt_now R36_NowNs
 static void glt_add(int *slot, const char *name, unsigned long long t0) {
     unsigned long long d = glt_now() - t0;
     GlT *g;
@@ -670,6 +731,7 @@ static void disp_alloc(int w, int h) {
     }
     sDispW = w;
     sDispH = h;
+    rFbo = R_UNK;
     R36_LogLine("r36 gl: display buffers %d x %d\n", w, h);
 }
 /* the renderer's viewport and scissor, as the target bound wants them (the display: mirrored) */
@@ -683,7 +745,7 @@ static void apply_vp(void) {
     }
 }
 static void bind_target(void) {
-    p_glBindFramebuffer(GL_FRAMEBUFFER, sOnDisp ? sDispFbo[gxm_back_buffer_index % NDISP] : sFboBound);
+    r_fbo(sOnDisp ? sDispFbo[gxm_back_buffer_index % NDISP] : sFboBound);
     apply_vp();
 }
 void r36_glBindFramebuffer(GLenum target, GLuint fb) {
@@ -853,7 +915,7 @@ void r36_glLinkProgram(GLuint p) {
 void r36_glUseProgram(GLuint p) {
     ENTER();
     sCurProg = p;
-    p_glUseProgram(p);
+    r_use(p);
     LEAVE();
 }
 
@@ -865,7 +927,7 @@ void r36_glBindBuffer(GLenum target, GLuint b) {
     } else if (target == GL_ELEMENT_ARRAY_BUFFER) {
         sElemBuf = b;
     }
-    p_glBindBuffer(target, b);
+    r_bind(target, b);
     LEAVE();
 }
 void r36_glBufferData(GLenum target, GLsizeiptr size, const void *data, GLenum usage) {
@@ -880,6 +942,9 @@ void r36_glBufferData(GLenum target, GLsizeiptr size, const void *data, GLenum u
             bf->nr = 0;
         }
     }
+    if (target == GL_ELEMENT_ARRAY_BUFFER) {
+        r_bind(target, sElemBuf); /* (vglFastDrawPtr leaves 0 bound) */
+    }
     p_glBufferData(target, size, data, usage);
     LEAVE();
 }
@@ -893,6 +958,7 @@ void r36_glDeleteBuffers(GLsizei n, const GLuint *b) {
         }
     }
     p_glDeleteBuffers(n, b);
+    r_forget(); /* (a buffer bound or under an attribute is let go of: 0 in its place; its name may come back) */
     LEAVE();
 }
 /* (vitaGL: the buffer's memory itself, for good; here a copy in main memory, see vglR36Dirty) */
@@ -997,13 +1063,13 @@ static void flush_dirty(void) {
 void r36_glEnableVertexAttribArray(GLuint i) {
     ENTER();
     if (i < 4) { sAttr[i].on = 1; }
-    p_glEnableVertexAttribArray(i);
+    r_attr_on(i, 1);
     LEAVE();
 }
 void r36_glDisableVertexAttribArray(GLuint i) {
     ENTER();
     if (i < 4) { sAttr[i].on = 0; }
-    p_glDisableVertexAttribArray(i);
+    r_attr_on(i, 0);
     LEAVE();
 }
 void r36_glVertexAttribPointer(GLuint i, GLint size, GLenum type, GLboolean norm, GLsizei stride, const void *ptr) {
@@ -1012,7 +1078,7 @@ void r36_glVertexAttribPointer(GLuint i, GLint size, GLenum type, GLboolean norm
         Attr *a = &sAttr[i];
         a->set = 1; a->size = size; a->type = type; a->norm = norm; a->stride = stride; a->ptr = ptr; a->buf = sArrayBuf;
     }
-    p_glVertexAttribPointer(i, size, type, norm, stride, ptr);
+    r_vap(i, size, type, norm, stride, ptr);
     LEAVE();
 }
 static void attr_restore(void) { /* the renderer's attributes 0..3 back as it set them */
@@ -1020,16 +1086,12 @@ static void attr_restore(void) { /* the renderer's attributes 0..3 back as it se
     for (i = 0; i < 4; i++) {
         Attr *a = &sAttr[i];
         if (a->set) {
-            p_glBindBuffer(GL_ARRAY_BUFFER, a->buf);
-            p_glVertexAttribPointer((GLuint)i, a->size, a->type, a->norm, a->stride, a->ptr);
+            r_bind(GL_ARRAY_BUFFER, a->buf);
+            r_vap((GLuint)i, a->size, a->type, a->norm, a->stride, a->ptr);
         }
-        if (a->on) {
-            p_glEnableVertexAttribArray((GLuint)i);
-        } else {
-            p_glDisableVertexAttribArray((GLuint)i);
-        }
+        r_attr_on((GLuint)i, a->on);
     }
-    p_glBindBuffer(GL_ARRAY_BUFFER, sArrayBuf);
+    r_bind(GL_ARRAY_BUFFER, sArrayBuf);
 }
 
 /* ---- draws ---- */
@@ -1049,11 +1111,11 @@ static void pre_draw(void) {
 /* a draw with program 0: the fixed-function pipeline's way, with our shader */
 static void ff_attr(int i, const Attr *a, int on) {
     if (on && a->ptr != NULL) {
-        p_glBindBuffer(GL_ARRAY_BUFFER, 0);
-        p_glVertexAttribPointer((GLuint)i, a->size, a->type, a->type == GL_UNSIGNED_BYTE ? GL_TRUE : GL_FALSE, a->stride, a->ptr);
-        p_glEnableVertexAttribArray((GLuint)i);
+        r_bind(GL_ARRAY_BUFFER, 0);
+        r_vap((GLuint)i, a->size, a->type, a->type == GL_UNSIGNED_BYTE ? GL_TRUE : GL_FALSE, a->stride, a->ptr);
+        r_attr_on((GLuint)i, 1);
     } else {
-        p_glDisableVertexAttribArray((GLuint)i);
+        r_attr_on((GLuint)i, 0);
     }
 }
 static void ff_begin(void) {
@@ -1066,7 +1128,7 @@ static void ff_begin(void) {
         case GL_EQUAL: af = 5; break; case GL_GEQUAL: af = 6; break; case GL_GREATER: af = 7; break; default: af = 8; break;
         }
     }
-    p_glUseProgram(sFFProg);
+    r_use(sFFProg);
     p_glUniform1f(sFFU[0], sOnDisp ? -1.0f : 1.0f);
     p_glUniform4f(sFFU[1], sFF.color[0], sFF.color[1], sFF.color[2], sFF.color[3]);
     p_glUniform1f(sFFU[2], sFF.ca ? 1.0f : 0.0f);
@@ -1075,10 +1137,10 @@ static void ff_begin(void) {
     ff_attr(0, &sFF.v, sFF.va);
     ff_attr(1, &sFF.c, sFF.ca);
     ff_attr(2, &sFF.t, sFF.ta);
-    p_glDisableVertexAttribArray(3);
+    r_attr_on(3, 0);
 }
 static void ff_end(void) {
-    p_glUseProgram(sCurProg);
+    r_use(sCurProg);
     attr_restore();
 }
 void r36_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
@@ -1098,9 +1160,11 @@ void r36_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *idx
     pre_draw();
     if (sCurProg == 0) {
         ff_begin();
+        r_bind(GL_ELEMENT_ARRAY_BUFFER, sElemBuf);
         p_glDrawElements(mode, count, type, idx);
         ff_end();
     } else {
+        r_bind(GL_ELEMENT_ARRAY_BUFFER, sElemBuf);
         p_glDrawElements(mode, count, type, idx);
     }
     LEAVE();
@@ -1131,6 +1195,7 @@ void vglFastDraw(GLenum type, uint32_t offset, uint32_t count, const void *vunif
     if (p != NULL && p->u >= 0) {
         p_glUniform4fv(p->u, (GLsizei)(size / 16u), (const GLfloat *)vunif);
     }
+    r_bind(GL_ELEMENT_ARRAY_BUFFER, sElemBuf);
     p_glDrawElements(GL_TRIANGLES, (GLsizei)count, type, (const void *)(uintptr_t)offset);
     LEAVE();
 }
@@ -1141,9 +1206,8 @@ void vglFastDrawPtr(GLenum type, const void *idx, uint32_t count, const void *vu
     if (p != NULL && p->u >= 0) {
         p_glUniform4fv(p->u, (GLsizei)(size / 16u), (const GLfloat *)vunif);
     }
-    p_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0); /* (indices in main memory) */
+    r_bind(GL_ELEMENT_ARRAY_BUFFER, 0); /* (indices in main memory; the renderer's own put back at the next draw that needs it) */
     p_glDrawElements(GL_TRIANGLES, (GLsizei)count, type, idx);
-    p_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sElemBuf);
     LEAVE();
 }
 uint32_t vglFastVertUniformSize(GLuint prog) { return (int)prog < sProgCap ? sProg[prog].usize : 0; }
@@ -1227,7 +1291,7 @@ static void present_tex(GLuint tex, int w, int h, int flipped) {
     } else {
         sh = (float)sWinW / a / (float)sWinH;
     }
-    p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    r_fbo(0);
     p_glViewport(0, 0, sWinW, sWinH);
     p_glDisable(GL_SCISSOR_TEST);
     p_glDisable(GL_BLEND);
@@ -1237,17 +1301,17 @@ static void present_tex(GLuint tex, int w, int h, int flipped) {
     p_glColorMask(1, 1, 1, 1);
     p_glClearColor(0, 0, 0, 1);
     p_glClear(GL_COLOR_BUFFER_BIT);
-    p_glUseProgram(sPresentProg);
+    r_use(sPresentProg);
     p_glUniform4f(sPresentU[0], sw, flipped ? sh : -sh, 0.0f, 0.0f);
     p_glUniform1i(sPresentU[1], 0);
     p_glActiveTexture(GL_TEXTURE0);
     p_glBindTexture(GL_TEXTURE_2D, tex);
-    p_glBindBuffer(GL_ARRAY_BUFFER, 0);
-    p_glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, kQuad);
-    p_glEnableVertexAttribArray(0);
-    p_glDisableVertexAttribArray(1);
-    p_glDisableVertexAttribArray(2);
-    p_glDisableVertexAttribArray(3);
+    r_bind(GL_ARRAY_BUFFER, 0);
+    r_vap(0, 2, GL_FLOAT, GL_FALSE, 0, kQuad);
+    r_attr_on(0, 1);
+    r_attr_on(1, 0);
+    r_attr_on(2, 0);
+    r_attr_on(3, 0);
     p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     SDL_GL_SwapWindow(sWin);
 }
@@ -1267,7 +1331,7 @@ static void state_restore(void) {
         p_glBindTexture(GL_TEXTURE_2D, real_tex(sBound[0]));
         p_glActiveTexture(GL_TEXTURE0 + (GLenum)sUnit);
     }
-    p_glUseProgram(sCurProg);
+    r_use(sCurProg);
     attr_restore();
     bind_target();
 }
@@ -1374,7 +1438,12 @@ R36_GL_PASS_V(glClearStencil, (GLint s), (s))
 R36_GL_PASS(GLuint, glCreateProgram, (void), ())
 R36_GL_PASS_V(glDepthFunc, (GLenum func), (func))
 R36_GL_PASS_V(glDepthMask, (GLboolean flag), (flag))
-R36_GL_PASS_V(glDeleteFramebuffers, (GLsizei n, const GLuint *framebuffers), (n, framebuffers))
+void r36_glDeleteFramebuffers(GLsizei n, const GLuint *framebuffers) {
+    ENTER();
+    p_glDeleteFramebuffers(n, framebuffers);
+    rFbo = R_UNK; /* (the one bound may be gone: 0 in its place) */
+    LEAVE();
+}
 R36_GL_PASS_V(glFinish, (void), ())
 R36_GL_PASS_V(glFlush, (void), ())
 R36_GL_PASS_V(glGenFramebuffers, (GLsizei n, GLuint *framebuffers), (n, framebuffers))
