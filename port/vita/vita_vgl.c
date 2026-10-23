@@ -1872,7 +1872,15 @@ static int pal_get(uint64_t key, uint64_t texa, uint32_t gen, uint32_t cbp, uint
     return freeK;
 }
 /* a texture of the table let go: its own GL texture, and its indices and palette when nothing else uses them */
+#ifdef PORT_R36S
+static int rt_tex_del(GLuint id);
+#endif
 static void tex_free(Tex *t) {
+#ifdef PORT_R36S
+    if (t->pi < 0 && rt_tex_del(t->id)) {
+        return;
+    }
+#endif
     rt_sync();
     if (t->pi >= 0) {
         glBindTexture(GL_TEXTURE_2D, t->id);
@@ -2054,7 +2062,9 @@ static GLuint texture_get_k(uint64_t t0raw, uint64_t texa) {
         gT126Deferred++;
         return 0;
     }
+#ifndef PORT_R36S
     rt_sync(); /* (vitaGL is this thread's again) */
+#endif
     if (sTexCount == MAX_TEX) { /* full: drop what was not used for a second, or failing that not in this frame */
         unsigned long long tev = sceKernelGetProcessTimeWide();
         unsigned keep = gGsFrame > 30 ? gGsFrame - 30 : 0;
@@ -2112,6 +2122,9 @@ static GLuint texture_get_k(uint64_t t0raw, uint64_t texa) {
             t->amax = 255;
             sIdxT[pi].refs++;
             sPalT[pp].refs++;
+#ifdef PORT_R36S
+            rt_sync(); /* (vitaGL is this thread's again) */
+#endif
             glGenTextures(1, &t->id);
             sGlc.tex = 0;
             glBindTexture(GL_TEXTURE_2D, t->id);
@@ -2192,6 +2205,18 @@ static GLuint texture_get_k(uint64_t t0raw, uint64_t texa) {
         }
         made++;
     }
+#ifdef PORT_R36S
+    if (!(gVglSafe & 33554432) && sRtOn) { /* (the render thread makes it: R36_TexNewLazy's number now, its GL texture there) */
+        extern GLuint R36_TexNewLazy(void);
+        t->id = R36_TexNewLazy();
+        if (rt_tex_up(t->id, tw, th, px)) {
+            goto made;
+        }
+        rt_sync(); /* (too large for the ring: made here) */
+        glDeleteTextures(1, &t->id); /* (the lazy number given back) */
+    }
+    rt_sync(); /* (vitaGL is this thread's again) */
+#endif
     glGenTextures(1, &t->id);
     sGlc.tex = 0; /* (the binding changes here) */
     glBindTexture(GL_TEXTURE_2D, t->id);
@@ -2217,6 +2242,9 @@ static GLuint texture_get_k(uint64_t t0raw, uint64_t texa) {
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)tw, (GLsizei)th, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
     }
       gVitaWall[3] += sceKernelGetProcessTimeWide() - w0; }
+#ifdef PORT_R36S
+made:
+#endif
     {
         uint32_t h = bucket_of(t0, texa, gen);
         while (sTexBucket[h] != 0) {
@@ -2392,6 +2420,8 @@ static void flush_run(const FlushIn *in) {
 #define RT_GLOW 6 /* the native glow */
 #define RT_FOG 7 /* the fog byte from the depth */
 #define RT_XF 8 /* the intro's cross-fade */
+#define RT_TEXUP 9 /* (R36S / TrimUI) a texture's pixels, made by the render thread: the drawing thread does not wait */
+#define RT_TEXDEL 10 /* (R36S / TrimUI) a texture let go */
 typedef struct RtHdr { uint32_t size, op, pad_[2]; } RtHdr;
 static uint8_t *sRtRing;
 static volatile uint32_t sRtHead, sRtTail; /* bytes handed over / done, counting on (the ring's place: & (RT_RING - 1)) */
@@ -2543,6 +2573,32 @@ static void rt_put_draw(const FlushIn *in) {
     }
     rt_commit();
 }
+#ifdef PORT_R36S
+/* (R36S / TrimUI) a texture made or let go by the render thread, in its turn among the draws: the drawing thread
+   neither waits for the ring to empty nor takes the GL context for it (each wait was the two threads in step) */
+static int rt_tex_up(GLuint id, uint32_t w, uint32_t h, const uint32_t *px) {
+    uint32_t n = w * h * 4u;
+    uint32_t *q;
+    if (!sRtOn || 16u + n > RT_RING / 4) {
+        return 0;
+    }
+    q = (uint32_t *)(void *)rt_reserve(RT_TEXUP, 16u + n);
+    q[0] = id; q[1] = w; q[2] = h; q[3] = 0;
+    memcpy(q + 4, px, n);
+    rt_commit();
+    return 1;
+}
+static int rt_tex_del(GLuint id) {
+    uint32_t *q;
+    if (!sRtOn) {
+        return 0;
+    }
+    q = (uint32_t *)(void *)rt_reserve(RT_TEXDEL, 16u);
+    q[0] = id; q[1] = q[2] = q[3] = 0;
+    rt_commit();
+    return 1;
+}
+#endif
 static void rt_exec_dp(uint8_t *p);
 /* The packet at the tail made by whoever holds sRtLock: the render thread, or the drawing thread when the
    render thread has not moved for 2 ms while it waits for it (on the fourth core the system's shell can stop it for
@@ -2580,6 +2636,16 @@ static int rt_exec_one(void) {
             fog_exec((const uint8_t *)(h + 1));
         } else if (h->op == RT_XF) {
             xf_exec((const uint8_t *)(h + 1));
+        } else if (h->op == RT_TEXUP) {
+            const uint32_t *q = (const uint32_t *)(const void *)(h + 1);
+            glBindTexture(GL_TEXTURE_2D, q[0]);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)q[1], (GLsizei)q[2], 0, GL_RGBA, GL_UNSIGNED_BYTE, q + 4);
+            sGlc.tex = 0; /* (the binding changed) */
+        } else if (h->op == RT_TEXDEL) {
+            const uint32_t *q = (const uint32_t *)(const void *)(h + 1);
+            GLuint id = q[0];
+            glDeleteTextures(1, &id);
+            sGlc.tex = 0;
         }
         sRtWhere = 0;
         gVitaRt[6] += sceKernelGetProcessTimeWide() - t0;

@@ -691,25 +691,38 @@ void R36_ScreenSize(int *w, int *h) {
     *h = sWinH;
 }
 
-/* ---- textures ---- */
+/* ---- textures ----
+   The table of the renderer's texture numbers is made once at its full size (16384): the drawing thread takes a
+   number for a texture the render thread will make (R36_TexNewLazy), and the table is never moved under the other. */
+#define VTEX_CAP 16384
+static pthread_mutex_t sTexLock = PTHREAD_MUTEX_INITIALIZER;
 static int vtex_new(void) {
     int v;
     static int next = 1;
+    pthread_mutex_lock(&sTexLock);
+    if (sTex == NULL) {
+        sTex = (VTex *)calloc(VTEX_CAP, sizeof(VTex));
+        sTexCap = VTEX_CAP;
+    }
     if (sTexFree >= 0) {
         v = sTexFree;
         sTexFree = (int)sTex[v].real;
     } else {
         if (next >= sTexCap) {
-            int n = sTexCap ? sTexCap * 2 : 1024;
-            sTex = (VTex *)realloc(sTex, sizeof(VTex) * (size_t)n);
-            memset(sTex + sTexCap, 0, sizeof(VTex) * (size_t)(n - sTexCap));
-            sTexCap = n;
+            pthread_mutex_unlock(&sTexLock);
+            R36_LogLine("r36 gl: out of texture numbers\n");
+            abort();
         }
         v = next++;
     }
     memset(&sTex[v], 0, sizeof(VTex));
     sTex[v].used = 1;
+    pthread_mutex_unlock(&sTexLock);
     return v;
+}
+/* a texture number whose GL texture is made when it is first bound (by the thread that holds the context then) */
+GLuint R36_TexNewLazy(void) {
+    return (GLuint)vtex_new();
 }
 static GLuint real_tex(GLuint v) {
     if (v == 0 || (int)v >= sTexCap || !sTex[v].used) {
@@ -720,6 +733,9 @@ static GLuint real_tex(GLuint v) {
     }
     if (sTex[v].alias == 4) {
         return sDepthTex;
+    }
+    if (sTex[v].real == 0) { /* (R36_TexNewLazy's: made now) */
+        p_glGenTextures(1, &sTex[v].real);
     }
     return sTex[v].real;
 }
@@ -747,10 +763,12 @@ void r36_glDeleteTextures(GLsizei n, const GLuint *t) {
                 sBound[u] = 0;
             }
         }
+        pthread_mutex_lock(&sTexLock);
         sTex[v].used = 0;
         sTex[v].alias = 0;
         sTex[v].real = (GLuint)sTexFree;
         sTexFree = (int)v;
+        pthread_mutex_unlock(&sTexLock);
     }
     LEAVE();
 }
