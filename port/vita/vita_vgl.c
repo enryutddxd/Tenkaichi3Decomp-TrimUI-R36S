@@ -2885,7 +2885,22 @@ static void flush_impl(const FlushIn *in) {
             {   /* (for the log: the draw call itself, apart from the state set before it) */
                 unsigned long long d0 = sceKernelGetProcessTimeWide();
                 ZM(38);
+#ifdef PORT_R36S
+                {   /* (the indices into the stream, when they are in memory: the driver does not copy them) */
+                    extern long R36_Stream(const void *data, size_t n);
+                    extern GLuint R36_StreamBuf(void), R36_ElemBuf(void);
+                    long at = R36_ElemBuf() == 0 ? R36_Stream(in->idx, (size_t)in->idxCount * 2u) : -1;
+                    if (at >= 0) {
+                        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, R36_StreamBuf());
+                        glDrawElements(GL_TRIANGLES, in->idxCount, GL_UNSIGNED_SHORT, (const void *)(uintptr_t)at);
+                        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+                    } else {
+                        glDrawElements(GL_TRIANGLES, in->idxCount, GL_UNSIGNED_SHORT, in->idx);
+                    }
+                }
+#else
                 glDrawElements(GL_TRIANGLES, in->idxCount, GL_UNSIGNED_SHORT, in->idx);
+#endif
                 ZM(39);
                 gVitaWall[5] += sceKernelGetProcessTimeWide() - d0;
             }
@@ -8784,11 +8799,21 @@ static void dpb_flush(int n, int slot, const uint16_t *const *src, const uint32_
     glUniform4fv(var->u[0], n * slot, sDpbU);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     if (ix != NULL) {
+        extern long R36_Stream(const void *data, size_t n);
+        extern GLuint R36_StreamBuf(void);
+        long at;
         for (o = ix, k = 0; k < n; k++) {
             memcpy(o, src[k], cnt[k] * 2);
             o += cnt[k];
         }
-        glDrawElements(GL_TRIANGLES, (GLsizei)total, GL_UNSIGNED_SHORT, ix);
+        at = R36_Stream(ix, (size_t)total * 2u); /* (into the stream: the driver does not copy them from memory) */
+        if (at >= 0) {
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, R36_StreamBuf());
+            glDrawElements(GL_TRIANGLES, (GLsizei)total, GL_UNSIGNED_SHORT, (const void *)(uintptr_t)at);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        } else {
+            glDrawElements(GL_TRIANGLES, (GLsizei)total, GL_UNSIGNED_SHORT, ix);
+        }
         gR36Dpb[1]++;
     } else { /* (no scratch memory left this picture: one by one, each still finding its slot) */
         for (k = 0; k < n; k++) {
