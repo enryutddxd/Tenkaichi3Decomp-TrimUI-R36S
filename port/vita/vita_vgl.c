@@ -9901,6 +9901,17 @@ static void pace_cb(void *fb) {
 
     if (sPaceOn < 0) {
         sPaceOn = !(gVglSafe & 134217728);
+#ifdef PORT_R36S
+        /* (the R36S / TrimUI: off. This callback is called by the drawing thread itself at its swap
+           (port/r36s/shim/r36s_gl.c), not by a display thread of its own as vitaGL's is on the Vita: holding a
+           picture back for its blank held the drawing thread with it, up to five blanks a picture, the lists
+           behind it were left out for it, and the fights stayed at 20 pictures a second with cores to spare.
+           R36_PACE=1: on) */
+        {
+            const char *e = getenv("R36_PACE");
+            sPaceOn = sPaceOn && e != NULL && atoi(e) != 0;
+        }
+#endif
     }
     for (i = 0; i < 4; i++) {
         if (sPb[i].valid && sPb[i].addr == fb) {
