@@ -471,6 +471,8 @@ int sceIoRename(const char *a, const char *b) {
     return rename(R36_Path(a, p, sizeof(p)), R36_Path(b, q, sizeof(q))) < 0 ? err_of() : 0;
 }
 
+static SDL_AudioDeviceID sDev; /* (the sound device, below) */
+
 /* ---- the controller ---- */
 static volatile unsigned sPadButtons;
 static volatile unsigned char sPadAxes[4] = {128, 128, 128, 128}; /* lx, ly, rx, ry */
@@ -623,6 +625,14 @@ int sceCtrlPeekBufferPositive(int port, SceCtrlData *pad, int count) {
     pad->ly = sPadAxes[1];
     pad->rx = sPadAxes[2];
     pad->ry = sPadAxes[3];
+    {   /* (the sound's library is started by then too: the handlers once more, the first time) */
+        static int once;
+        if (!once && sDev != 0) {
+            extern void R36_CrashHandlers(void);
+            once = 1;
+            R36_CrashHandlers();
+        }
+    }
     return 1;
 }
 int sceCtrlReadBufferPositive(int port, SceCtrlData *pad, int count) { return sceCtrlPeekBufferPositive(port, pad, count); }
@@ -898,6 +908,26 @@ static void crash(int sig, siginfo_t *si, void *ctx) {
 static void term(int sig) {
     (void)sig;
     _exit(0);
+}
+/* (again after the system's libraries are loaded and started: one of them may have put a handler of its own in
+   front, which then hid where a crash was) */
+void R36_CrashHandlers(void) {
+    struct sigaction sa, old;
+    int sigs[5] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT}, i;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = crash;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    for (i = 0; i < 5; i++) {
+        if (sigaction(sigs[i], &sa, &old) == 0 && (old.sa_flags & SA_SIGINFO ? (void *)old.sa_sigaction : (void *)old.sa_handler) != (void *)crash &&
+            old.sa_handler != SIG_DFL && old.sa_handler != SIG_IGN) {
+            Dl_info di;
+            void *h = old.sa_flags & SA_SIGINFO ? (void *)old.sa_sigaction : (void *)old.sa_handler;
+            memset(&di, 0, sizeof(di));
+            dladdr(h, &di);
+            R36_LogLine("r36: signal %d had a handler of %s (%s): ours put back in front\n", sigs[i], di.dli_fname ? di.dli_fname : "?",
+                        di.dli_sname ? di.dli_sname : "?");
+        }
+    }
 }
 __attribute__((constructor)) static void crash_init(void) {
     struct sigaction sa;

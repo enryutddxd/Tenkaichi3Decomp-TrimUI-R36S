@@ -402,6 +402,10 @@ int R36_VideoInit(void) {
     p_glClear(GL_COLOR_BUFFER_BIT);
     SDL_GL_SwapWindow(sWin);
     sVideoUp = 1;
+    {
+        extern void R36_CrashHandlers(void);
+        R36_CrashHandlers();
+    }
     tHold = 1;
     sCtxHeld = 1;
     ctx_give(); /* (taken by whichever thread draws) */
@@ -1120,6 +1124,10 @@ GLboolean vglInitExtended(int legacy_pool_size, int width, int height, int ram_t
     p_glClearDepthf(0.0f);
     p_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     p_glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    {
+        extern void R36_CrashHandlers(void);
+        R36_CrashHandlers();
+    }
     return GL_TRUE;
 }
 

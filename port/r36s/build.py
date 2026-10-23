@@ -34,7 +34,7 @@ OUT = ROOT / "port/build/r36s"
 GEN = ROOT / "port/build/gen/r36s"
 ZIG = shlex.split(os.environ.get("BT3_R36S_ZIG", f"{shlex.quote(sys.executable)} -m ziglang"))
 BU = os.environ.get("BT3_R36S_BINUTILS", "arm-linux-gnueabihf-")
-TARGET = ["-target", "arm-linux-gnueabihf.2.28", "-mcpu=cortex_a35"]
+TARGET = ["-target", "arm-linux-gnueabihf.2.28", "-mcpu=cortex_a35-neon"]
 CC = ZIG + ["cc"] + TARGET
 CXX = ZIG + ["c++"] + TARGET
 
@@ -51,7 +51,12 @@ ABI = ["-fsigned-char", "-fno-short-enums", "-fsigned-bitfields"]
 # The game's float arithmetic follows the PS2 by running the float unit in round-toward-zero / flush-to-zero
 # (Vita_FloatMode). NEON's float instructions ignore that mode, so nothing of the game's is vectorised.
 NOVEC = ["-fno-vectorize", "-fno-slp-vectorize"]
-COMMON = ["-O2", "-g", "-fno-strict-aliasing", "-ffp-contract=off", "-w", "-Wno-error", "-fno-pie", "-fcommon",
+# No NEON in what is built from here (but where a file asks for it): the compiler gives NEON loads and stores of a
+# 16-byte type an alignment of 16 that the R36S's processor enforces (an alignment fault, SIGBUS), and the game's data
+# (PS2 vectors and the structures around them) is not always laid out that way. The float unit (VFPv4) alone needs 4.
+FPU = []  # (the -neon of TARGET's -mcpu: zig takes no -mfpu)
+NEON_FILES = {"vita_vgl.c"}  # (arm_neon.h intrinsics)
+COMMON = FPU + ["-O2", "-g", "-fno-strict-aliasing", "-ffp-contract=off", "-w", "-Wno-error", "-fno-pie", "-fcommon",
           "-Wno-error=int-conversion", "-Wno-error=incompatible-function-pointer-types", "-Wno-error=implicit-function-declaration",
           "-Wno-error=incompatible-pointer-types", "-Wno-error=return-type", "-Wno-error=int-to-pointer-cast",
           "-DPORT_VITA=1", "-DPORT_VITA_FIXED=1", "-DPORT_R36S=1", '-DPORT_VITA_SFX=".txt"', "-DPORT_VITA_GFX=1", "-DPORT_VITA_VGL=1",
@@ -212,6 +217,8 @@ def cc_port(item):
         r = run(base + ["-O3", "-include", "r36s_force.h", "-include", "vita_cold.h", "-Dgetenv=Vita_GsGetenv"] + SHIM_INC +
                 [f"-I{ROOT / 'port/src/gs'}", f"-I{V / 'sdlshim'}", str(f), "-o", str(o)])
     elif kind == "hard":
+        if f.name in NEON_FILES:
+            base = base + ["-mcpu=cortex_a35"]
         r = run(base + ["-O3", "-include", "r36s_force.h", "-include", "vita_cold.h"] + SHIM_INC + [f"-I{GEN}", str(f), "-o", str(o)])
     elif kind == "shim":
         r = run(base + ["-O2", "-D_GNU_SOURCE", "-Wall", "-Wno-unused-function"] + SHIM_INC + [str(f), "-o", str(o)])
