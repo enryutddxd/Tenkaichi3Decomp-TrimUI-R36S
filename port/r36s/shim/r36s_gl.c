@@ -151,6 +151,7 @@ static pthread_mutex_t sCtxLock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t sCtxCond = PTHREAD_COND_INITIALIZER;
 static int sCtxHeld;          /* a thread holds it */
 static volatile int sCtxWant; /* threads waiting for it */
+static pthread_t sCtxOwner;   /* (for the log: who has it) */
 static __thread int tHold;    /* this thread holds it */
 static __thread int tKeep;    /* this thread keeps it while it waits (the render thread: asked for it, it lets go) */
 static __thread int tSticky;  /* this thread keeps it between calls (the drawing and render threads); others for one call */
@@ -176,11 +177,15 @@ static void ctx_take(void) {
     }
     sCtxWant--;
     if (sCtxHeld) { /* the holder did not let it go in 3 s: nothing to do but go on without it */
+        char who[32] = "?", me[32] = "?";
+        pthread_getname_np(sCtxOwner, who, sizeof(who));
+        pthread_getname_np(pthread_self(), me, sizeof(me));
         pthread_mutex_unlock(&sCtxLock);
-        R36_LogLine("r36 gl: the GL context was not given up by the thread holding it (3 s)\n");
+        R36_LogLine("r36 gl: the GL context was not given up by the thread holding it (%s) in 3 s; %s goes on without it\n", who, me);
         return;
     }
     sCtxHeld = 1;
+    sCtxOwner = pthread_self();
     pthread_mutex_unlock(&sCtxLock);
     t1 = R36_NowNs();
     SDL_GL_MakeCurrent(sWin, sCtx);

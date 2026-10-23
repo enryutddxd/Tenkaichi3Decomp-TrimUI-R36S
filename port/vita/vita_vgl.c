@@ -2492,10 +2492,7 @@ static int rt_exec_one(void) {
 static void rt_ctx_wake(void) { /* (r36s_gl.c: a thread waits for the context the render thread keeps) */
     sRtGiveCtx = 1;
     __sync_synchronize();
-    if (sRtSleep) {
-        sRtSleep = 0;
-        sceKernelSignalSema(sRtSema, 1);
-    }
+    sceKernelSignalSema(sRtSema, 1); /* (always: it may be on its way to sleep; a spare count only wakes it once more) */
 }
 #endif
 static int rt_thread(SceSize args, void *argp) {
@@ -2524,6 +2521,12 @@ static int rt_thread(SceSize args, void *argp) {
             }
             sRtSleep = 1;
             __sync_synchronize();
+#ifdef PORT_R36S
+            if (sRtGiveCtx) { /* (asked while it looked for work: let go before sleeping) */
+                sRtGiveCtx = 0;
+                R36_GlRelease();
+            }
+#endif
             if (t == sRtHead) {
                 sRtWhere = 3;
                 sceKernelWaitSema(sRtSema, 1, NULL);
