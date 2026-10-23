@@ -158,7 +158,7 @@ def compile_ee(cmd, src, o, game=False, ee=True, p32=True):
         r = run([a for a in cc2 if a != "-c"] + ["-S", "-emit-llvm", "-x", "c", str(i), "-o", str(ll)])
         if r.returncode:
             return r
-        fixed, _ = irfix.fix(ll.read_text(encoding="latin-1"))
+        fixed, _ = irfix.fix(ll.read_text(encoding="latin-1"), aarch64=True)
         ll.write_text(fixed, encoding="latin-1")
         opt = [a for a in cc2 if a.startswith("-O")][-1:] or ["-O2"]
         incs = [a for a in cc2 if a.startswith("-I")]  # (for the module's `.include "labels.inc"`)

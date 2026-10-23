@@ -36,16 +36,63 @@ def data_line(line):
     line = line.replace("ptr addrspace(271) null", "i32 0").replace("ptr addrspace(271) undef", "i32 undef").replace("ptr addrspace(271) poison", "i32 poison")
     return line.replace("ptr addrspace(271)", "i32")
 
+def split_top(s):
+    """s split at its top-level commas (not inside (), [], {}, <> or quotes)."""
+    parts, depth, cur, q = [], 0, [], False
+    for ch in s:
+        if ch == '"':
+            q = not q
+        elif not q:
+            if ch in "([{<":
+                depth += 1
+            elif ch in ")]}>":
+                depth -= 1
+            elif ch == "," and depth == 0:
+                parts.append("".join(cur))
+                cur = []
+                continue
+        cur.append(ch)
+    parts.append("".join(cur))
+    return parts
+
+MEMOP = re.compile(r'^(\s*(?:%[\w.$-]+ = )?)(load|store|atomicrmw|cmpxchg)\b(.*)$')
+
+def memop_line(line, n, out):
+    """(the AArch64 code generator, `aarch64=True`) a load or store through a 4-byte pointer: through an ordinary
+    pointer instead. LLVM's AArch64 back end selects these wrongly: a byte stored through a constant 4-byte address
+    became a 4-byte store (ColorFade_Draw's `fade->a`, which overwrote the fade's alpha with zeros every frame)."""
+    m = MEMOP.match(line)
+    if not m or "addrspace(271)" not in m.group(3):
+        return line, n
+    parts = split_top(m.group(3))
+    kind = m.group(2)
+    idx = 1 if kind in ("load", "store") else 0
+    if idx >= len(parts):
+        return line, n
+    part = parts[idx]
+    k = part.find("ptr addrspace(271) ")
+    if k < 0 or (idx == 1 and part[:k].strip() != ""):
+        return line, n
+    op = part[k + len("ptr addrspace(271) "):].rstrip()
+    if not op or " " in op and not op.startswith(("getelementptr", "addrspacecast", "inttoptr", "bitcast")):
+        return line, n
+    n += 1
+    out.append(f"  %p32m.{n} = addrspacecast ptr addrspace(271) {op} to ptr")
+    parts[idx] = part[:k] + f"ptr %p32m.{n}" + (" " if part.endswith(" ") else "")
+    return m.group(1) + kind + ",".join(parts), n
+
 BITCAST = re.compile(r'^(\s*%[\w.$-]+ = )bitcast (ptr(?: addrspace\(271\))? \S+) to (ptr(?: addrspace\(271\))?)(?=,|$)')
 GLOBAL = re.compile(r'^@[^=]+ = .*\b(global|constant)\b')
 TYPEDEF = re.compile(r'^%[^=]+ = type ')
 
-def fix(text):
+def fix(text, aarch64=False):
     out, n, declared, need = [], 0, set(), {}
     for line in text.split("\n"):
         if "addrspace(271)" in line and (GLOBAL.match(line) or TYPEDEF.match(line)):
             out.append(data_line(line))
             continue
+        if aarch64 and "addrspace(271)" in line:
+            line, n = memop_line(line, n, out)
         if " bitcast " in line and "addrspace(271)" in line:
             # clang writes a plain bitcast between a 4-byte and an ordinary pointer in a conditional expression that
             # mixes the two (`a ? param : &obj->field`); the conversion that exists for that is addrspacecast
