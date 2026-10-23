@@ -1309,6 +1309,7 @@ int gVitaFxOff;             /* (the log's pictures without the effects: with the
 extern int gVitaSliver;
 int gVitaFxSweep;           /* the effects left out in turn, 60 pictures each, the chip's time logged by which */
 int gVitaFxAb = 0;          /* (TrimUI test build) see frame_begin */
+int gVitaOptAb = 1;         /* (TrimUI test build) the driver's ways of doing less (gR36Opt) off every other 10 s */
 int gVitaFxMask;            /* 1 the table passes, 2 the glow, 4 the work targets' effects, 8 the outline */
 #define FX_WT_OFF (gVitaFxOff || (gVitaFxMask & 4))
 int gVitaClipOff;           /* the fighters' reject of program 0 not done (the log's pictures; bt3.txt safe2=512) */
@@ -3078,9 +3079,42 @@ static void flush_impl(const FlushIn *in) {
         }
 #ifdef PORT_R36S
         {   /* (port/r36s/shim/r36s_gl.c) the vertices, and the indices, into the stream: no glBufferData per draw */
-            extern long R36_Stream(const void *data, size_t n);
+            extern long R36_Stream(const void *data, size_t n), R36_Stream32(const void *data, size_t n);
             extern GLuint R36_StreamBuf(void), R36_ElemBuf(void);
-            long vo = R36_Stream(in->verts, (size_t)in->vertCount * sizeof(V)), io = 0;
+            extern int gR36Opt, R36_DrawElementsBase(GLenum mode, GLsizei count, GLenum type, long off, GLint base);
+            long vo = gR36Opt ? R36_Stream32(in->verts, (size_t)in->vertCount * sizeof(V)) : R36_Stream(in->verts, (size_t)in->vertCount * sizeof(V)), io = 0;
+            if (gR36Opt && vo >= 0 && (in->idx == NULL || (io = R36_Stream(in->idx, (size_t)in->idxCount * 2u)) >= 0)) {
+                /* the attributes at the stream's start, as for the draw before: the draw says where its vertices begin */
+                GLuint sb = R36_StreamBuf();
+                GLint first = (GLint)(vo / (long)sizeof(V));
+                glBindBuffer(GL_ARRAY_BUFFER, sb);
+                glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(V), (const void *)(uintptr_t)0);
+                glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(V), (const void *)(uintptr_t)28);
+                glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(V), (const void *)(uintptr_t)16);
+                ZM(38);
+                if (in->idx == NULL) {
+                    glDrawArrays(s->topo ? GL_LINES : GL_TRIANGLES, first, in->vertCount);
+                    goto drawn;
+                }
+                if (R36_DrawElementsBase(GL_TRIANGLES, in->idxCount, GL_UNSIGNED_SHORT, io, first)) {
+                    goto drawn;
+                }
+                /* (no such draw: the pointers where the vertices are) */
+                glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(V), (const void *)(uintptr_t)(vo + 0));
+                glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(V), (const void *)(uintptr_t)(vo + 28));
+                glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(V), (const void *)(uintptr_t)(vo + 16));
+                {
+                    GLuint prev = R36_ElemBuf();
+                    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sb);
+                    glDrawElements(GL_TRIANGLES, in->idxCount, GL_UNSIGNED_SHORT, (const void *)(uintptr_t)io);
+                    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, prev);
+                }
+            drawn:
+                ZM(39);
+                glBindBuffer(GL_ARRAY_BUFFER, 0);
+                goto streamed;
+            }
+            io = 0;
             if (vo >= 0 && in->idx != NULL) {
                 io = R36_Stream(in->idx, (size_t)in->idxCount * 2u);
             }
@@ -6485,6 +6519,11 @@ void GsGpu_FrameEnd(void) {
             extern volatile unsigned gR36ProfWindow; /* (r36s_prof.c: its report's number) */
             gVitaFxMask = (gR36ProfWindow & 1) ? 15 : 0;
         }
+        if (gVitaOptAb) {
+            extern volatile unsigned gR36ProfWindow;
+            extern int gR36Opt;
+            gR36Opt = (gR36ProfWindow & 1) == 0;
+        }
     }
 #endif
     if (gVitaFxSweep == 1 && !gVitaGsSkip) { /* the effects left out in turn, 60 pictures each */
@@ -9052,6 +9091,8 @@ static void dp_draw_batched(DpItem *items, int first, int mode, const Variant *v
 static void dp_draw_items(DpItem *items, int n, int prof) {
     static struct { State st; uint32_t h; int mode, first, last; } bk[512];
     static int16_t bhead[512], bnext[512]; /* (the runs found by their number, not one after the other) */
+    static int16_t ord[512];
+    static uint64_t okey[512];
     int lastUnsafe = -1; /* the run begun last that is not st_commutes */
     /* pass 2: the silhouettes, into the work page; first when the page is the target now (its clear was
        the draw before), so that the target changes once */
@@ -9116,8 +9157,43 @@ static void dp_draw_items(DpItem *items, int n, int prof) {
         if (nb > 0 && pass != 2) {
             target_set(0);
         }
+        {   /* (TrimUI, gR36Opt) runs next to each other that may go in any order (opaque, depth-tested: st_commutes)
+               sorted by what the driver must change between them: the program, then the texture, then the rest */
+            extern int gR36Opt;
+            int a, j;
+            for (a = 0; a < nb; a++) {
+                ord[a] = (int16_t)a;
+            }
+            if (gR36Opt && pass != 2 && gVitaOrder) {
+                for (a = 0; a < nb; a++) {
+                    const State *t = &bk[a].st;
+                    int tf = t->tme && t->tex != 0 ? (t->env == 1 ? 2 : t->env == 2 ? 3 : 1) : 0;
+                    int tt = t->atest && t->afunc != 1 && !(t->afunc == 5 && t->aref == 0);
+                    okey[a] = st_commutes(t) ? ((uint64_t)(bk[a].mode & 3) << 60 | (uint64_t)(tf | tt << 2 | (t->mask & 15) << 3) << 52 |
+                                                (uint64_t)(t->tex & 0xFFFFFu) << 32 | (uint64_t)bk[a].h)
+                                             : ~0ull;
+                }
+                for (a = 0; a < nb;) {
+                    int e = a;
+                    while (e < nb && okey[e] != ~0ull) {
+                        e++;
+                    }
+                    for (j = a + 1; j < e; j++) { /* (insertion sort of the stretch a..e-1; equal keys keep their order) */
+                        int16_t v = ord[j];
+                        int m = j;
+                        while (m > a && okey[ord[m - 1]] > okey[v]) {
+                            ord[m] = ord[m - 1];
+                            m--;
+                        }
+                        ord[m] = v;
+                    }
+                    a = e + 1;
+                }
+            }
+        }
         ZM(40); /* (the parts of these draws, zones 40..43) */
-        for (i = 0; i < nb; i++) {
+        for (int oi = 0; oi < nb; oi++) {
+            i = ord[oi];
             const State *s = &bk[i].st;
             int mode = bk[i].mode, kind = mode == 1 ? 3 : 4, q;
             int tst = s->atest && s->afunc != 1 && !(s->afunc == 5 && s->aref == 0);

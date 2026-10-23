@@ -1182,6 +1182,16 @@ static void read_settings(void) {
         } else if (strcmp(line, "safe2") == 0) { /* vita_vgl.c's gVglSafe2: 1 a picture handed to the chip whole, 2 no render thread, 8 the render thread on the fourth core */
             extern int gVglSafe2;
             gVglSafe2 = (int)strtol(eq, NULL, 0);
+        } else if (strcmp(line, "fx") == 0) { /* fx=0: the effects' own passes left out (glow, outline, table passes, work targets): lighter, plainer */
+            extern int gVitaFxMask;
+            gVitaFxMask = atoi(eq) == 0 ? 15 : 0;
+        } else if (strcmp(line, "opt") == 0) { /* (TrimUI) 0: the driver's ways of doing less off (r36s_gl.c gR36Opt); 1 on; both: no A/B */
+            extern int gR36Opt, gVitaOptAb;
+            gR36Opt = atoi(eq) != 0;
+            gVitaOptAb = 0;
+        } else if (strcmp(line, "optab") == 0) {
+            extern int gVitaOptAb;
+            gVitaOptAb = atoi(eq);
         } else if (strcmp(line, "fxab") == 0) { /* (TrimUI test build) the effects off every other 10 s */
             extern int gVitaFxAb;
             gVitaFxAb = atoi(eq);

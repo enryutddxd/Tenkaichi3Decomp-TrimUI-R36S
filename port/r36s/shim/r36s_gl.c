@@ -65,6 +65,7 @@ extern void R36_LogLine(const char *fmt, ...);
     X(void, glUseProgram, (GLuint)) X(void, glVertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *)) \
     X(void, glVertexAttrib4f, (GLuint, GLfloat, GLfloat, GLfloat, GLfloat)) X(void, glViewport, (GLint, GLint, GLsizei, GLsizei)) \
     X(void, glBindVertexArray, (GLuint)) X(void *, glMapBufferRange, (GLenum, GLintptr, GLsizeiptr, GLbitfield)) X(GLboolean, glUnmapBuffer, (GLenum)) \
+    X(void, glDrawElementsBaseVertex, (GLenum, GLsizei, GLenum, const void *, GLint)) \
     X(GLsync, glFenceSync, (GLenum, GLbitfield)) X(GLenum, glClientWaitSync, (GLsync, GLbitfield, GLuint64)) X(void, glDeleteSync, (GLsync)) \
     X(void, glBufferStorageEXT, (GLenum, GLsizeiptr, const void *, GLbitfield))
 #define X(r, n, p) static r(*p_##n) p;
@@ -91,6 +92,19 @@ static unsigned ev_name(const char *n) {
 typedef struct RAttr { GLuint buf; GLint size; GLenum type; GLboolean norm; GLsizei stride; const void *ptr; signed char valid, on; } RAttr;
 static GLuint rBuf[2] = {R_UNK, R_UNK}, rProg = R_UNK, rFbo = R_UNK;
 static RAttr rAt[8];
+/* (TrimUI) the driver's way of doing less: 1 the array buffer bound only when an attribute pointer or the buffer's data
+   needs it (a draw does not read that binding), the texture parameters a texture already has left out, the stream's
+   vertices at one place for the attributes (a draw's first vertex instead of new pointers), the stage's runs of state
+   that may go in any order sorted by program and texture. 0: as before. vita_vgl.c sets it (bt3.txt opt, optab). */
+int gR36Opt = 1;
+static GLuint rArrWant = R_UNK; /* the array buffer the renderer has bound (rBuf[0]: the driver's) */
+static inline void r_arr_sync(void) {
+    if (rArrWant != R_UNK && rBuf[0] != rArrWant) {
+        p_glBindBuffer(GL_ARRAY_BUFFER, rArrWant);
+        rBuf[0] = rArrWant;
+        gR36Chg[3]++;
+    }
+}
 static void r_forget(void) {
     int i;
     rBuf[0] = rBuf[1] = rProg = rFbo = R_UNK;
@@ -102,7 +116,12 @@ static void r_forget(void) {
 __attribute__((constructor)) static void r_init(void) { r_forget(); }
 static inline void r_bind(GLenum t, GLuint b) {
     int k = t == GL_ARRAY_BUFFER ? 0 : t == GL_ELEMENT_ARRAY_BUFFER ? 1 : -1;
-    if (k < 0) {
+    if (k == 0) {
+        rArrWant = b;
+        if (!gR36Opt) {
+            r_arr_sync();
+        }
+    } else if (k < 0) {
         p_glBindBuffer(t, b);
     } else if (rBuf[k] != b) {
         p_glBindBuffer(t, b);
@@ -112,6 +131,7 @@ static inline void r_bind(GLenum t, GLuint b) {
 }
 static inline void r_vap(GLuint i, GLint size, GLenum type, GLboolean norm, GLsizei stride, const void *ptr) {
     RAttr *a;
+    r_arr_sync();
     if (i >= 8) {
         p_glVertexAttribPointer(i, size, type, norm, stride, ptr);
         return;
@@ -436,6 +456,7 @@ typedef struct VTex {
     GLuint real;
     int alias;              /* 0 its own, 1..3 display buffer n-1, 4 the depth buffer */
     int used;
+    GLint tp[4];            /* (gR36Opt) its filters and wraps as last set; 0 not known */
     SceGxmTexture gxm;      /* (vglGetGxmTexture: a stand-in nothing reads) */
 } VTex;
 static VTex *sTex;
@@ -805,11 +826,19 @@ void r36_glTexSubImage2D(GLenum target, GLint level, GLint x, GLint y, GLsizei w
 }
 void r36_glTexParameteri(GLenum target, GLenum pname, GLint param) {
     ENTER();
-    sEv |= 64;
     GLuint v = sBound[sUnit & 3];
+    int k = pname == GL_TEXTURE_MIN_FILTER ? 0 : pname == GL_TEXTURE_MAG_FILTER ? 1 : pname == GL_TEXTURE_WRAP_S ? 2 : pname == GL_TEXTURE_WRAP_T ? 3 : -1;
     if (v != 0 && (int)v < sTexCap && sTex[v].alias == 4 && (pname == GL_TEXTURE_MIN_FILTER || pname == GL_TEXTURE_MAG_FILTER)) {
         param = GL_NEAREST; /* (a depth texture is not filtered in OpenGL ES 3) */
     }
+    if (target == GL_TEXTURE_2D && k >= 0 && v != 0 && (int)v < sTexCap && sTex[v].used && sTex[v].alias == 0) {
+        if (gR36Opt && sTex[v].tp[k] == param) {
+            LEAVE();
+            return; /* (what it has already: the driver not told again) */
+        }
+        sTex[v].tp[k] = param;
+    }
+    sEv |= 64;
     p_glTexParameteri(target, pname, param);
     LEAVE();
 }
@@ -1120,6 +1149,8 @@ void r36_glBufferData(GLenum target, GLsizeiptr size, const void *data, GLenum u
     }
     if (target == GL_ELEMENT_ARRAY_BUFFER) {
         r_bind(target, sElemBuf); /* (vglFastDrawPtr leaves 0 bound) */
+    } else if (target == GL_ARRAY_BUFFER) {
+        r_arr_sync();
     }
     p_glBufferData(target, size, data, usage);
     LEAVE();
@@ -1135,6 +1166,12 @@ void r36_glDeleteBuffers(GLsizei n, const GLuint *b) {
         }
     }
     pthread_mutex_unlock(&sBufLock);
+    r_arr_sync();
+    for (GLsizei i = 0; i < n; i++) {
+        if (b[i] == rArrWant) {
+            rArrWant = 0; /* (a bound buffer let go: 0 bound in its place) */
+        }
+    }
     p_glDeleteBuffers(n, b);
     r_forget(); /* (a buffer bound or under an attribute is let go of: 0 in its place; its name may come back) */
     LEAVE();
@@ -1340,6 +1377,13 @@ long R36_Stream(const void *data, size_t n) {
     return at;
 }
 GLuint R36_ElemBuf(void) { return sElemBuf; }
+/* (as R36_Stream) at a multiple of 32 bytes: a vertex's place in the stream as a whole number of vertices */
+long R36_Stream32(const void *data, size_t n) {
+    if (sStreamOff == 0) {
+        sStreamAt = (sStreamAt + 31u) & ~31u;
+    }
+    return R36_Stream(data, n);
+}
 
 /* ---- vertex attributes ---- */
 void r36_glEnableVertexAttribArray(GLuint i) {
@@ -1485,6 +1529,20 @@ void r36_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *idx
         { unsigned long long dt0_ = draw_t0(); p_glDrawElements(mode, count, type, idx); draw_done(dt0_); }
     }
     LEAVE();
+}
+/* (vita_vgl.c) indices in the stream at off, their vertices from vertex base on: 0 when the driver has no such draw */
+int R36_DrawElementsBase(GLenum mode, GLsizei count, GLenum type, long off, GLint base) {
+    if (p_glDrawElementsBaseVertex == NULL || sCurProg == 0) {
+        return 0;
+    }
+    ENTER_R(0);
+    site_note((uintptr_t)__builtin_return_address(0));
+    pre_draw();
+    r_bind(GL_ELEMENT_ARRAY_BUFFER, sStreamBuf);
+    { unsigned long long dt0_ = draw_t0(); p_glDrawElementsBaseVertex(mode, count, type, (const void *)(uintptr_t)off, base); draw_done(dt0_); }
+    r_bind(GL_ELEMENT_ARRAY_BUFFER, sElemBuf);
+    LEAVE();
+    return 1;
 }
 void r36_glAlphaFunc(GLenum func, GLfloat ref) { sFF.afunc = func; sFF.aref = ref; }
 void r36_glColor4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { sFF.color[0] = r; sFF.color[1] = g; sFF.color[2] = b; sFF.color[3] = a; }

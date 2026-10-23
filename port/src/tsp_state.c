@@ -17,6 +17,12 @@ extern int32_t GPTR gMcFlow;
 void R36_GameState(FILE *f) {
     extern volatile unsigned gR36ProfWindow;
     extern int gVitaFxAb;
+    extern int gVitaOptAb, gR36Opt;
+    if (gVitaOptAb) {
+        fprintf(f, "  OPT in these 10 s: %s\n", (gR36ProfWindow & 1) ? "off (A/B)" : "ON (A/B)");
+    } else {
+        fprintf(f, "  OPT: %s\n", gR36Opt ? "on" : "off");
+    }
     if (gVitaFxAb) {
         fprintf(f, "  effects in these 10 s: %s\n", (gR36ProfWindow & 1) ? "LEFT OUT (A/B)" : "on");
     }
