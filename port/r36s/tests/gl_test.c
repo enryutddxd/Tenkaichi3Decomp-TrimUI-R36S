@@ -104,6 +104,28 @@ static int sCbCalls;
 static void display_cb(void *fb) { (void)fb; sCbCalls++; }
 static volatile int sDrawerReady, sTextDone;
 
+/* the render thread of 8b */
+extern void (*gR36CtxWake)(void);
+extern void R36_GlKeep(void), R36_GlRelease(void);
+extern unsigned long long R36_NowNs(void);
+static SceUID sRtSema;
+static volatile int sRtGive, sRtHas, sRtQuit;
+static void rt_wake(void) { sRtGive = 1; sceKernelSignalSema(sRtSema, 1); }
+static void *rt_main(void *a) {
+    (void)a;
+    R36_GlKeep();
+    glClear(GL_COLOR_BUFFER_BIT); /* (taken: kept) */
+    sRtHas = 1;
+    while (!sRtQuit) {
+        sceKernelWaitSema(sRtSema, 1, NULL); /* (asleep with the context) */
+        if (sRtGive) {
+            sRtGive = 0;
+            R36_GlRelease();
+        }
+    }
+    return NULL;
+}
+
 static void *drawer(void *arg) {
     V v[6];
     GLuint p, pc, ff;
@@ -305,6 +327,26 @@ static void *drawer(void *arg) {
         vglSwapBuffers(GL_FALSE);
         CHECK(sCbCalls == 1, "display callback called once: %d", sCbCalls);
         realBindFb(GL_FRAMEBUFFER, 0); /* (the window's own, read back: SDL keeps the picture in the back buffer after a swap on Mesa, so draw again) */
+    }
+    /* 8b. a render thread that keeps the context while it waits for work (vita_vgl.c rt_thread): asked for it by
+       the wake hook, it lets go; the drawing thread then gets it at once, not after the 3 s give-up */
+    {
+        pthread_t rt;
+        unsigned long long t0;
+        sRtSema = sceKernelCreateSema("rt", 0, 0, 100, NULL);
+        gR36CtxWake = rt_wake;
+        pthread_create(&rt, NULL, rt_main, NULL);
+        while (!sRtHas) {
+            sceKernelDelayThread(1000); /* (this thread lets go of the context while it waits) */
+        }
+        t0 = R36_NowNs();
+        glClear(GL_COLOR_BUFFER_BIT); /* (the render thread asleep with the context: woken to let go) */
+        CHECK(R36_NowNs() - t0 < 500000000ull, "the context back from the sleeping render thread in %llu ms", (R36_NowNs() - t0) / 1000000ull);
+        sRtQuit = 1;
+        sceKernelSignalSema(sRtSema, 1);
+        pthread_join(rt, NULL);
+        gR36CtxWake = NULL;
+        CHECK(glGetError() == GL_NO_ERROR, "no GL error after the render thread");
     }
     sDrawerReady = 1;
     /* 9. idle as the drawing thread is between lists: another thread prints on the text screen */

@@ -30,6 +30,7 @@
 
 extern void Vita_Log(const char *fmt, ...);
 extern void R36_GlYield(void);
+extern void R36_GlBlocking(void); /* (r36s_gl.c: the GL context let go before this thread waits) */
 
 /* ---- the log of the shim: stderr (err.txt) and the game's log ---- */
 void R36_LogLine(const char *fmt, ...) {
@@ -75,6 +76,7 @@ static void clk_init(void) {
     pthread_mutex_lock(&sClkLock);
     if (sClk == 0) {
         volatile int ok = 0;
+        volatile double seen = -1.0; /* (the counter's rate as measured; -1: not readable) */
         const char *e = getenv("R36_CLOCK");
         clock_gettime(CLOCK_MONOTONIC, &sT0);
 #ifdef __arm__
@@ -91,8 +93,10 @@ static void clk_init(void) {
                 nanosleep(&d, NULL);
                 c1 = cnt_read();
                 n1 = mono_ns();
+                seen = 0.0;
                 if (c1 > c0 && n1 > n0) {
                     double hz = (double)(c1 - c0) * 1e9 / (double)(n1 - n0);
+                    seen = hz;
                     /* (the counter's rate rounded to a whole kHz; 1 to 200 MHz) */
                     if (hz > 1e6 && hz < 2e8) {
                         double khz = (double)(uint64_t)(hz / 1000.0 + 0.5);
@@ -108,7 +112,8 @@ static void clk_init(void) {
         }
 #endif
         if (!ok) {
-            R36_LogLine("r36: the clock from clock_gettime\n");
+            R36_LogLine(seen < 0.0 ? "r36: the clock from clock_gettime (the processor's counter is not readable here: SIGILL)\n"
+                                   : "r36: the clock from clock_gettime (the processor's counter runs at %.0f Hz)\n", seen);
         }
         __sync_synchronize();
         sClk = ok ? 1 : 2;
@@ -142,7 +147,11 @@ unsigned long long R36_NowNs(void) {
 }
 unsigned int sceKernelGetProcessTimeLow(void) { return (unsigned int)sceKernelGetProcessTimeWide(); }
 int sceKernelDelayThread(SceUInt delay) {
-    R36_GlYield();
+    if (delay == 0) {
+        R36_GlYield();
+    } else {
+        R36_GlBlocking();
+    }
     if (delay == 0) {
         sched_yield();
     } else {
@@ -250,6 +259,7 @@ int sceKernelWaitThreadEnd(SceUID thid, int *stat, SceUInt *timeout) {
         return -1;
     }
     if (!sTh[thid - 1].joined) {
+        R36_GlBlocking();
         pthread_join(sTh[thid - 1].pt, NULL);
         sTh[thid - 1].joined = 1;
     }
@@ -351,9 +361,13 @@ int sceKernelWaitSema(SceUID id, int signal, SceUInt *timeout) {
     if (id < 0x100 || id >= 0x100 + 32) {
         return -1;
     }
-    R36_GlYield();
     s = &sSema[id - 0x100];
     pthread_mutex_lock(&s->m);
+    if (s->count < signal) { /* (about to wait: the GL context to whoever wants it) */
+        pthread_mutex_unlock(&s->m);
+        R36_GlBlocking();
+        pthread_mutex_lock(&s->m);
+    }
     if (timeout != NULL) {
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
@@ -426,7 +440,10 @@ int sceKernelLockMutex(SceUID id, int lockCount, unsigned int *timeout) {
         return -1;
     }
     while (lockCount-- > 0) {
-        pthread_mutex_lock(&sMutex[id - 0x200]);
+        if (pthread_mutex_trylock(&sMutex[id - 0x200]) != 0) {
+            R36_GlBlocking();
+            pthread_mutex_lock(&sMutex[id - 0x200]);
+        }
     }
     return 0;
 }

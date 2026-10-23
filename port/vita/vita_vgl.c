@@ -1435,7 +1435,12 @@ int GsGpu_Init(void) {
     /* the R36S: textures with a palette converted to colours (OpenGL ES has no palette textures), the draws on the
        drawing thread itself (the GL context belongs to one thread), no multisampling */
     gVglSafe |= 268435456;
-    gVglSafe2 |= 2;
+    {   /* the render thread as on the Vita (the GL context goes back and forth: port/r36s/shim/r36s_gl.c); R36_RT=0: the draws on the drawing thread */
+        const char *e = getenv("R36_RT");
+        if (e != NULL && atoi(e) == 0) {
+            gVglSafe2 |= 2;
+        }
+    }
     gVitaMsaa = 0;
 #endif
     memset(&sTextFb, 0, sizeof(sTextFb));
@@ -2305,11 +2310,21 @@ void Vita_VglState(char *b, int n) {
 }
 unsigned long long gVitaRt[8];             /* for the log: packets, bytes; waits for the ring to empty, us; waits for room, us; us busy making them; made by the drawing thread itself */
 static inline uint32_t a16(uint32_t n) { return (n + 15u) & ~15u; }
+#ifdef PORT_R36S /* (port/r36s/shim/r36s_gl.c: one GL context for the two threads) */
+extern void R36_GlRelease(void);
+extern void R36_GlKeep(void);
+extern void (*gR36CtxWake)(void);
+static volatile int sRtGiveCtx; /* the drawing thread wants the context the render thread keeps */
+#define R36_CTX_RELEASE() R36_GlRelease()
+#else
+#define R36_CTX_RELEASE() ((void)0)
+#endif
 static uint8_t *rt_reserve(uint32_t op, uint32_t bytes) {
     uint32_t total = a16(bytes + (uint32_t)sizeof(RtHdr)), off = sRtW & (RT_RING - 1), pad = off + total > RT_RING ? RT_RING - off : 0;
     RtHdr *h;
     if (sRtW + pad + total - sRtTail > RT_RING) {
         unsigned long long t0 = sceKernelGetProcessTimeWide();
+        R36_CTX_RELEASE(); /* (the render thread needs it to make room) */
         gVitaDrawWhere = 2;
         while (sRtW + pad + total - sRtTail > RT_RING) {
             __asm__ volatile("yield");
@@ -2349,6 +2364,7 @@ static void rt_commit(void) {
     __sync_synchronize();
     sRtHead = sRtW;
     __sync_synchronize();
+    R36_CTX_RELEASE(); /* (the drawing thread's own GL calls are over: the render thread may go on with the context) */
     if (sRtSleep && (++sRtUnsig >= 4 || sRtPend >= (64u << 10))) {
         rt_kick();
     }
@@ -2362,6 +2378,7 @@ static void rt_sync(void) {
         uint32_t lastTail = sRtTail, spins = 0;
         unsigned long long moved = t0;
         gVitaDrawWhere = 1;
+        R36_CTX_RELEASE();
         rt_kick();
         while (sRtTail != sRtW) {
             if ((++spins & 63) == 0) {
@@ -2471,11 +2488,30 @@ static int rt_exec_one(void) {
     __sync_lock_release(&sRtLock);
     return 1;
 }
+#ifdef PORT_R36S
+static void rt_ctx_wake(void) { /* (r36s_gl.c: a thread waits for the context the render thread keeps) */
+    sRtGiveCtx = 1;
+    __sync_synchronize();
+    if (sRtSleep) {
+        sRtSleep = 0;
+        sceKernelSignalSema(sRtSema, 1);
+    }
+}
+#endif
 static int rt_thread(SceSize args, void *argp) {
     (void)args;
     (void)argp;
+#ifdef PORT_R36S
+    R36_GlKeep(); /* (kept while it waits for work: let go when the drawing thread asks, rt_ctx_wake) */
+#endif
     for (;;) {
         uint32_t t = sRtTail;
+#ifdef PORT_R36S
+        if (sRtGiveCtx) {
+            sRtGiveCtx = 0;
+            R36_GlRelease();
+        }
+#endif
         if (t == sRtHead) {
             if (gVitaRtCore == 3) { /* (a core of its own: a moment's look before sleeping; nothing longer, the system's work is there too) */
                 int k;
@@ -2532,6 +2568,9 @@ static void rt_start(void) {
     }
     { extern void Vita_WatchThread(int slot, int id, const char *name); Vita_WatchThread(5, th, "render"); }
     gVitaRtCore = !(gVglSafe2 & 8) && gVitaCore3 == 1 ? 3 : 0;
+#ifdef PORT_R36S
+    gR36CtxWake = rt_ctx_wake;
+#endif
     __sync_synchronize();
     sRtOn = 1;
     Vita_Log("vgl: the draws made on a render thread of their own, on core %d\n", gVitaRtCore);

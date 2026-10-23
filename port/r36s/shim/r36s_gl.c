@@ -140,22 +140,37 @@ static int sWinW = 640, sWinH = 480;
 static int sVideoUp;
 int gR36Vsync = 1;
 
-/* ---- who holds the context ---- */
+/* ---- who holds the context ----
+   One GL context, current on one thread at a time. A thread that makes a GL call takes it (waiting while another
+   has it) and keeps it, so that a run of calls costs nothing more; it lets it go when it is about to wait (a
+   semaphore, a sleep, a mutex held elsewhere: R36_GlRelease from r36s_psp2.c), when it hands work to the render
+   thread (vita_vgl.c's ring) or when another thread asks for it at its next call. The renderer's render thread
+   (port/vita/vita_vgl.c rt_*) makes the draws; the drawing thread waits for it to be done (rt_sync) before a GL
+   call of its own, as on the Vita, so the two never interleave their calls. */
 static pthread_mutex_t sCtxLock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t sCtxCond = PTHREAD_COND_INITIALIZER;
 static int sCtxHeld;          /* a thread holds it */
 static volatile int sCtxWant; /* threads waiting for it */
 static __thread int tHold;    /* this thread holds it */
-static __thread int tPrimary; /* this thread keeps it (the drawing thread) */
-static int sPrimarySet;
+static __thread int tKeep;    /* this thread keeps it while it waits (the render thread: asked for it, it lets go) */
+static __thread int tSticky;  /* this thread keeps it between calls (the drawing and render threads); others for one call */
+void (*gR36CtxWake)(void);    /* (vita_vgl.c) the keeper asked to let go of it */
+unsigned long long gR36Ctx[4]; /* for the log: times taken, us waiting for it, us making it current, times given up */
+unsigned long long R36_NowNs(void);
 
 static void ctx_take(void) {
     struct timespec ts;
     int timedOut = 0;
+    unsigned long long t0 = R36_NowNs(), t1;
     pthread_mutex_lock(&sCtxLock);
     sCtxWant++;
     clock_gettime(CLOCK_REALTIME, &ts);
     ts.tv_sec += 3;
+    if (sCtxHeld && gR36CtxWake != NULL) {
+        pthread_mutex_unlock(&sCtxLock);
+        gR36CtxWake();
+        pthread_mutex_lock(&sCtxLock);
+    }
     while (sCtxHeld && !timedOut) {
         timedOut = pthread_cond_timedwait(&sCtxCond, &sCtxLock, &ts) != 0;
     }
@@ -166,67 +181,60 @@ static void ctx_take(void) {
         return;
     }
     sCtxHeld = 1;
-    pthread_cond_broadcast(&sCtxCond);
     pthread_mutex_unlock(&sCtxLock);
+    t1 = R36_NowNs();
     SDL_GL_MakeCurrent(sWin, sCtx);
     tHold = 1;
+    gR36Ctx[0]++;
+    gR36Ctx[1] += (t1 - t0) / 1000u;
+    gR36Ctx[2] += (R36_NowNs() - t1) / 1000u;
 }
 static void ctx_give(void) {
     SDL_GL_MakeCurrent(sWin, NULL);
     tHold = 0;
+    gR36Ctx[3]++;
     pthread_mutex_lock(&sCtxLock);
     sCtxHeld = 0;
     pthread_cond_broadcast(&sCtxCond);
     pthread_mutex_unlock(&sCtxLock);
 }
-/* the drawing thread, at a GL call or a wait: another thread wants the context for a moment */
-void R36_GlYield(void) {
-    if (tHold && tPrimary && sCtxWant) {
-        struct timespec ts;
+/* this thread has handed its work over (or was asked for the context): the context to whoever wants it */
+void R36_GlRelease(void) {
+    if (tHold) {
         ctx_give();
-        /* (until the one waiting has it: else this thread could take it straight back) */
-        clock_gettime(CLOCK_REALTIME, &ts);
-        ts.tv_nsec += 50000000L;
-        if (ts.tv_nsec >= 1000000000L) {
-            ts.tv_sec++;
-            ts.tv_nsec -= 1000000000L;
-        }
-        pthread_mutex_lock(&sCtxLock);
-        while (!sCtxHeld && sCtxWant > 0) {
-            if (pthread_cond_timedwait(&sCtxCond, &sCtxLock, &ts) != 0) {
-                break;
-            }
-        }
-        pthread_mutex_unlock(&sCtxLock);
-        ctx_take();
     }
 }
-/* returns 1 when the context was taken for this call only */
+/* this thread is about to wait: the context let go, but by the keeper (it lets go when asked) */
+void R36_GlBlocking(void) {
+    if (tHold && !tKeep) {
+        ctx_give();
+    }
+}
+void R36_GlKeep(void) { tKeep = 1; tSticky = 1; }
+int R36_GlWanted(void) { return sCtxWant != 0; }
+/* a moment's pause (sched_yield): the context only if another thread waits for it */
+void R36_GlYield(void) {
+    if (tHold && sCtxWant) {
+        ctx_give();
+    }
+}
+/* 0: go on (1: the context taken for this call only, let go at gl_leave); -1: no context */
 static inline int gl_enter(void) {
     if (__builtin_expect(tHold, 1)) {
-        if (__builtin_expect(sCtxWant != 0, 0)) {
-            R36_GlYield();
+        if (__builtin_expect(sCtxWant != 0, 0) && tSticky) { /* (another thread waits: it goes first) */
+            ctx_give();
+            sched_yield();
+        } else {
+            return 0;
         }
-        return 0;
     }
     ctx_take();
-    if (!tHold) {
-        return -1;
-    }
-    if (tPrimary) {
-        return 0;
-    }
-    return 1;
+    return !tHold ? -1 : tSticky ? 0 : 1;
 }
 static inline void gl_leave(int f) {
     if (f == 1) {
         ctx_give();
     }
-}
-/* this thread keeps the context from now on (vglInitExtended: the drawing thread) */
-static void gl_make_primary(void) {
-    tPrimary = 1;
-    sPrimarySet = 1;
 }
 /* the time each GL call takes on the clock (in the driver, waiting included), by function: prof.txt (r36s_prof.c) */
 typedef struct GlT { const char *name; unsigned long long ns, max; unsigned n, slow; } GlT;
@@ -236,9 +244,27 @@ static int sGlTn;
 static pthread_mutex_t sGlTLock = PTHREAD_MUTEX_INITIALIZER;
 unsigned long long R36_NowNs(void); /* (r36s_psp2.c: the processor's counter) */
 #define glt_now R36_NowNs
+static int sGltOn = -1;
+static inline unsigned long long glt_start(void) {
+    if (__builtin_expect(sGltOn == 0, 1)) {
+        return 0;
+    }
+    if (sGltOn < 0) {
+        const char *e = getenv("R36_GLTIME");
+        sGltOn = e != NULL && atoi(e) != 0;
+        if (!sGltOn) {
+            return 0;
+        }
+    }
+    return glt_now();
+}
 static void glt_add(int *slot, const char *name, unsigned long long t0) {
-    unsigned long long d = glt_now() - t0;
+    unsigned long long d;
     GlT *g;
+    if (__builtin_expect(t0 == 0, 1)) {
+        return;
+    }
+    d = glt_now() - t0;
     if (*slot < 0) {
         pthread_mutex_lock(&sGlTLock);
         if (*slot < 0 && sGlTn < GLT_MAX) {
@@ -282,6 +308,20 @@ void R36_GlTimes(FILE *f, double secs) {
         }
     }
     qsort(d, k, sizeof(GlT), glt_cmp);
+    {
+        static unsigned long long prev[4];
+        unsigned long long c[4];
+        int j;
+        for (j = 0; j < 4; j++) {
+            c[j] = gR36Ctx[j] - prev[j];
+            prev[j] = gR36Ctx[j];
+        }
+        fprintf(f, "GL context: taken %.0f times a second, waiting for it %.1f ms a second, making it current %.1f ms a second (%.0f us each)\n",
+                c[0] / secs, c[1] / 1000.0 / secs, c[2] / 1000.0 / secs, c[0] ? (double)c[2] / (double)c[0] : 0.0);
+    }
+    if (sGltOn != 1) {
+        return;
+    }
     fprintf(f, "GL calls on the clock (waiting included), ms per second: ");
     for (i = 0; i < k && i < 14; i++) {
         fprintf(f, "%s%s %.1f (%u calls/s, longest %.1f ms, %u over 2 ms)", i ? "; " : "", strncmp(d[i].name, "r36_", 4) == 0 ? d[i].name + 4 : d[i].name, d[i].ns / 1e6 / secs, (unsigned)(d[i].n / secs),
@@ -289,8 +329,8 @@ void R36_GlTimes(FILE *f, double secs) {
     }
     fprintf(f, "\n");
 }
-#define ENTER() static int glt_slot_ = -1; unsigned long long glt_t0_ = glt_now(); int gl_f_ = gl_enter(); if (gl_f_ < 0) { return; }
-#define ENTER_R(v) static int glt_slot_ = -1; unsigned long long glt_t0_ = glt_now(); int gl_f_ = gl_enter(); if (gl_f_ < 0) { return v; }
+#define ENTER() static int glt_slot_ = -1; unsigned long long glt_t0_ = glt_start(); int gl_f_ = gl_enter(); if (gl_f_ < 0) { return; }
+#define ENTER_R(v) static int glt_slot_ = -1; unsigned long long glt_t0_ = glt_start(); int gl_f_ = gl_enter(); if (gl_f_ < 0) { return v; }
 #define LEAVE() (gl_leave(gl_f_), glt_add(&glt_slot_, __func__, glt_t0_))
 
 /* ---- state the shim keeps track of ---- */
@@ -359,7 +399,9 @@ typedef struct Buf { GLuint id; uint32_t size; uint8_t *shadow; MapRange r[32]; 
 static Buf sBufs[16];
 static int sNBufs;
 static GLuint sArrayBuf, sElemBuf;
-static Buf *buf_find(GLuint id, int make) {
+/* (the table and the ranges written: the drawing thread marks what it writes, the render thread hands it over) */
+static pthread_mutex_t sBufLock = PTHREAD_MUTEX_INITIALIZER;
+static Buf *buf_find_(GLuint id, int make) {
     int i;
     for (i = 0; i < sNBufs; i++) {
         if (sBufs[i].id == id) {
@@ -372,6 +414,13 @@ static Buf *buf_find(GLuint id, int make) {
     memset(&sBufs[sNBufs], 0, sizeof(Buf));
     sBufs[sNBufs].id = id;
     return &sBufs[sNBufs++];
+}
+static Buf *buf_find(GLuint id, int make) {
+    Buf *b;
+    pthread_mutex_lock(&sBufLock);
+    b = buf_find_(id, make);
+    pthread_mutex_unlock(&sBufLock);
+    return b;
 }
 static volatile int sDirty;
 
@@ -495,6 +544,10 @@ int R36_VideoInit(void) {
         R36_LogLine("r36: no OpenGL ES 3 context: %s\n", SDL_GetError());
         return 0;
     }
+    pthread_mutex_lock(&sCtxLock); /* (current on this thread now: held by it) */
+    sCtxHeld = 1;
+    pthread_mutex_unlock(&sCtxLock);
+    tHold = 1;
     SDL_ShowCursor(SDL_DISABLE);
     {
         const char *v = getenv("R36_VSYNC");
@@ -950,13 +1003,15 @@ void r36_glBufferData(GLenum target, GLsizeiptr size, const void *data, GLenum u
 }
 void r36_glDeleteBuffers(GLsizei n, const GLuint *b) {
     ENTER();
+    pthread_mutex_lock(&sBufLock);
     for (GLsizei i = 0; i < n; i++) {
-        Buf *bf = buf_find(b[i], 0);
+        Buf *bf = buf_find_(b[i], 0);
         if (bf != NULL) {
             free(bf->shadow);
             *bf = sBufs[--sNBufs];
         }
     }
+    pthread_mutex_unlock(&sBufLock);
     p_glDeleteBuffers(n, b);
     r_forget(); /* (a buffer bound or under an attribute is let go of: 0 in its place; its name may come back) */
     LEAVE();
@@ -979,12 +1034,17 @@ void *r36_glMapBuffer(GLenum target, GLenum access) {
     return bf->shadow;
 }
 GLboolean r36_glUnmapBuffer(GLenum target) { (void)target; return GL_TRUE; }
+static void dirty_(const uint8_t *p, size_t size);
 void vglR36Dirty(const void *at, size_t size) {
-    const uint8_t *p = (const uint8_t *)at;
-    int i;
     if (size == 0) {
         return;
     }
+    pthread_mutex_lock(&sBufLock);
+    dirty_((const uint8_t *)at, size);
+    pthread_mutex_unlock(&sBufLock);
+}
+static void dirty_(const uint8_t *p, size_t size) {
+    int i;
     for (i = 0; i < sNBufs; i++) {
         Buf *b = &sBufs[i];
         if (b->shadow != NULL && p >= b->shadow && p < b->shadow + b->size) {
@@ -1023,20 +1083,33 @@ void vglR36Dirty(const void *at, size_t size) {
 unsigned gR36Up[2];       /* (for the log) bytes and ranges given to the GPU from mapped buffers */
 static int sNoUnsync = -1;
 static void flush_dirty(void) {
-    int i, k;
+    int i, k, nb = 0;
+    struct { GLuint id; uint8_t *shadow; int nr; struct { uint32_t lo, hi; } r[32]; } w[16];
     if (!sDirty) {
         return;
     }
-    sDirty = 0;
     if (sNoUnsync < 0) {
         const char *e = getenv("R36_NOUNSYNC");
         sNoUnsync = e != NULL && atoi(e) != 0;
     }
+    pthread_mutex_lock(&sBufLock); /* (the ranges taken as they are now; what is marked after waits for the next draw) */
+    sDirty = 0;
     for (i = 0; i < sNBufs; i++) {
-        Buf *b = &sBufs[i];
-        if (b->nr == 0) {
-            continue;
+        if (sBufs[i].nr != 0 && sBufs[i].shadow != NULL) {
+            w[nb].id = sBufs[i].id;
+            w[nb].shadow = sBufs[i].shadow;
+            w[nb].nr = sBufs[i].nr;
+            for (k = 0; k < sBufs[i].nr; k++) {
+                w[nb].r[k].lo = sBufs[i].r[k].lo;
+                w[nb].r[k].hi = sBufs[i].r[k].hi;
+            }
+            nb++;
         }
+        sBufs[i].nr = 0;
+    }
+    pthread_mutex_unlock(&sBufLock);
+    for (i = 0; i < nb; i++) {
+        typeof(&w[0]) b = &w[i];
         p_glBindBuffer(GL_COPY_WRITE_BUFFER, b->id);
         for (k = 0; k < b->nr; k++) {
             /* Written without waiting for the GPU and without the driver copying the buffer for it (glBufferSubData
@@ -1054,7 +1127,6 @@ static void flush_dirty(void) {
             gR36Up[0] += (unsigned)len;
             gR36Up[1]++;
         }
-        b->nr = 0;
     }
     p_glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
 }
@@ -1254,8 +1326,10 @@ GLboolean vglInitExtended(int legacy_pool_size, int width, int height, int ram_t
     if (!R36_VideoInit()) {
         return GL_FALSE;
     }
-    gl_make_primary(); /* (the thread that starts the renderer draws) */
-    ctx_take();
+    tSticky = 1; /* (the thread that starts the renderer draws: it keeps the context between its calls) */
+    if (!tHold) {
+        ctx_take();
+    }
     if (sDispMem == NULL) {
         sDispMem = (uint8_t *)calloc(1, 960u * 544u * 4u + 64u);
     }
