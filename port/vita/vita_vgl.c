@@ -379,14 +379,66 @@ static const char kFrag[] =
 /* The pixel shader in variants (texture function x alpha test): a shader without `discard` keeps the graphics
    chip's hidden-surface removal working (a PowerVR chip shades only what is seen in the end, unless a shader may
    discard pixels), and no variant branches on a uniform per pixel. Built when first needed. */
-static GLuint sVsKind[5]; /* the vertex shaders: the GS's (clip-space vertices), the stage's, the fighters', the direct path's fighters' and stage's */
-typedef struct Variant { GLuint prog; GLint test, tex, u[6]; } Variant;
+#ifdef PORT_R36S
+#include <ctype.h>
+/* ---- The R36S: the direct path's parts several to a draw. A draw costs the R36S's GL driver some 15 us (the
+   Vita's next to nothing): a fight's picture had ~750 of them, one per model part. Parts of one state go into one
+   draw, each with its constants in its own slot of a larger U, and the vertex shader finds a vertex's slot by its
+   number (gl_VertexID: the part's vertices are a range of the buffer, its slot's last place holds the range). The
+   parts of a draw must have ranges of their own (else a draw of their own); their order is kept. ---- */
+#define DPB_FT_SLOT 24 /* fighters: 23 constants + the range */
+#define DPB_FT_K 16
+#define DPB_ST_SLOT 7  /* stage: 6 + the range */
+#define DPB_ST_K 32
+static int getenv_off(const char *n) { const char *e = getenv(n); return e != NULL && atoi(e) == 0; }
+/* the direct path's shader with U[i] read from the vertex's slot: U[r36b + i] */
+static char *dp_batch_src(const char *src, int slot, int k, int nu) {
+    size_t n = strlen(src);
+    char *o = (char *)malloc(n * 2 + 1024), *w = o;
+    const char *p = src, *decl = strstr(src, "uniform float4 U["), *body;
+    if (o == NULL || decl == NULL) {
+        free(o);
+        return NULL;
+    }
+    memcpy(w, src, (size_t)(decl - src));
+    w += decl - src;
+    w += sprintf(w, "uniform float4 U[%d];\n", slot * k);
+    p = strchr(decl, '\n') + 1;
+    body = strstr(p, ") {\n");
+    if (body == NULL) {
+        free(o);
+        return NULL;
+    }
+    body += 4;
+    memcpy(w, p, (size_t)(body - p));
+    w += body - p;
+    w += sprintf(w, "    float r36vid = (float)gl_VertexID;\n    int r36s = 0;\n    int r36k;\n    float r36n = U[%d].z;\n"
+                    "    for (r36k = 0; r36k < %d; r36k++) {\n"
+                    "        float4 r36r = U[r36k * %d + %d];\n"
+                    "        if ((float)r36k < r36n && r36vid >= r36r.x && r36vid <= r36r.y) { r36s = r36k; }\n"
+                    "    }\n    int r36b = r36s * %d;\n", slot - 1, k, slot, slot - 1, slot);
+    for (p = body; *p;) {
+        if (p[0] == 'U' && p[1] == '[' && (p == src || !(isalnum((unsigned char)p[-1]) || p[-1] == '_'))) {
+            w += sprintf(w, "U[r36b + ");
+            p += 2;
+            continue;
+        }
+        *w++ = *p++;
+    }
+    *w = 0;
+    (void)nu;
+    return o;
+}
+#endif
+static GLuint sVsKind[7]; /* the vertex shaders: the GS's (clip-space vertices), the stage's, the fighters', the direct path's fighters' and stage's
+                             (R36S: 5, 6 the direct path's batched: several parts with their own constants in one draw) */
+typedef struct Variant { GLuint prog; GLint test, tex, u[6]; int bk; /* (R36S: a batched direct kind) */ } Variant;
 /* The texture read straight from the interpolated coordinates (tex2D), not divided by Q in the pixel shader
    (tex2Dproj): the chip fetches such a texture before the shader runs, and a read that depends on arithmetic
    in the shader waits for it (the GPU profile of a fifth of the chip's time in a fight). The GS's
    S, T, Q for the chip's own perspective interpolation: the vertex's w is 1 / Q, its coordinates S / Q. */
 static int sNoProj = 1;
-static Variant sVar[5][2048]; /* (+ 1024 the colour scaled by its own alpha here, blended with factor one) */  /* (+ 128 a picture drawn here as the texture, its alpha as stored; + 256 and without its alpha, TCC 0) */
+static Variant sVar[7][2048]; /* (+ 1024 the colour scaled by its own alpha here, blended with factor one) */  /* (+ 128 a picture drawn here as the texture, its alpha as stored; + 256 and without its alpha, TCC 0) */
 static GLuint sFragVar[2048]; /* (f + 8: the texture read straight from the coordinates, not divided by Q: the GPU profile) */
 /* the pixel shaders compiled once and kept on the memory card (ux0:data/bt3/shcache, by a hash of their
    source): the shader compiler takes ~0.2 s a program, 140 programs at the start; read back, a few ms */
@@ -591,7 +643,8 @@ static GLuint frag_variant(int f) {
 /* kind 0 the GS's vertices, 1 the stage's, 2 the fighters'; f: texture function (0 none, 1 modulate, 2 decal,
    3 decal with the vertex's alpha) + 4 with an alpha test. NULL if it cannot be built. */
 static const Variant *variant(int kind, int f) {
-    static const char *const kAttr[5][3] = {{"aPos", "aCol", "aTex"}, {"aPos", "aCol", "aTex"}, {"aPos", "aNrm", "aTex"}, {"aPos", "aNrm", "aTex"}, {"aPos", "aCol", "aTex"}};
+    static const char *const kAttr[7][3] = {{"aPos", "aCol", "aTex"}, {"aPos", "aCol", "aTex"}, {"aPos", "aNrm", "aTex"}, {"aPos", "aNrm", "aTex"}, {"aPos", "aCol", "aTex"},
+                                            {"aPos", "aNrm", "aTex"}, {"aPos", "aCol", "aTex"}};
     static const char *const kStage[6] = {"uR0", "uR1", "uR2", "uR3", "uK1", "uK2"};
     Variant *v = &sVar[kind][f];
     GLuint fs;
@@ -611,6 +664,7 @@ static const Variant *variant(int kind, int f) {
     }
     glLinkProgram(v->prog);
     v->test = glGetUniformLocation(v->prog, "uTest");
+    v->bk = kind >= 5;
     v->tex = glGetUniformLocation(v->prog, "uTex");
     for (k = 0; k < 6; k++) {
         v->u[k] = kind == 1 ? glGetUniformLocation(v->prog, kStage[k]) : kind == 2 && k == 0 ? glGetUniformLocation(v->prog, "uF") : kind == 2 && k == 1 ? glGetUniformLocation(v->prog, "uS") :
@@ -628,6 +682,9 @@ static int var_used(int ff) {
 }
 /* (and the GS's own with the colour across the screen: textured, read straight, kVertNP built) */
 static int var_used_k(int kk, int ff) {
+    if (kk >= 5) { /* (the batched direct path: as the direct path's) */
+        kk -= 2;
+    }
     if (ff & 1024) { /* (the GS's own blended with their colour scaled by its alpha) */
         return kk == 0 && !(ff & (128 | 256 | 512)) && var_used_k(kk, ff & 1023);
     }
@@ -820,11 +877,34 @@ static void shader_init(void) {
             }
             sVsKind[3 + k] = vsd;
         }
+#ifdef PORT_R36S
+        if (sVsKind[3] != 0 && sVsKind[4] != 0 && !getenv_off("R36_BATCH")) {
+            for (k = 0; k < 2; k++) {
+                char *bs = dp_batch_src(srcs[k], k == 0 ? DPB_FT_SLOT : DPB_ST_SLOT, k == 0 ? DPB_FT_K : DPB_ST_K, k == 0 ? 23 : 6);
+                GLuint vsb = bs != NULL ? glCreateShader(GL_CG_VERTEX_SHADER_EXT) : 0;
+                if (vsb == 0) {
+                    break;
+                }
+                src = bs; len = (GLint)strlen(bs); ok = 0;
+                glShaderSource(vsb, 1, &src, &len);
+                glCompileShader(vsb);
+                glGetShaderiv(vsb, GL_COMPILE_STATUS, &ok);
+                free(bs);
+                if (!ok) {
+                    log[0] = 0; glGetShaderInfoLog(vsb, sizeof(log) - 1, NULL, log); log[sizeof(log) - 1] = 0;
+                    Vita_Log("vgl: batched direct %s vertex shader not compiled: %s\n", k == 0 ? "fighter" : "stage", log);
+                    break;
+                }
+                sVsKind[5 + k] = vsb;
+            }
+            Vita_Log("vgl: the direct path's parts drawn several to a draw: %s\n", sVsKind[5] && sVsKind[6] ? "on" : "off");
+        }
+#endif
     }
     if (!(gVglSafe & 32768)) { /* every variant now, not in the middle of a fight */
         int kk, ff, built = 0;
         Vita_Log("vgl: start: the shader variants\n");
-        for (kk = 0; kk < 5; kk++) {
+        for (kk = 0; kk < 7; kk++) {
             for (ff = 0; ff < 2048; ff++) {
                 if (var_used_k(kk, ff)) {
                     built += variant(kk, ff) != NULL;
@@ -7594,7 +7674,8 @@ typedef struct DpRec { State d; uint64_t t0, texa; float u17[3]; const ChipPlan 
 #define DP_REC 768
 static DpRec sDpRec[DP_REC];
 static int sDpRecN, sDpRecBad;
-typedef struct DpGroup { State st; uint64_t t0, texa; uint32_t ioff, icount; uint16_t strips, ub; uint8_t mode, layer; const uint16_t *iptr; } DpGroup;
+typedef struct DpGroup { State st; uint64_t t0, texa; uint32_t ioff, icount; uint16_t strips, ub; uint8_t mode, layer; const uint16_t *iptr;
+                         uint32_t vlo, vhi, rngN; /* (R36S: the vertices its indices reach, worked out for icount rngN) */ } DpGroup;
 typedef struct DpUb { float u17[3]; uint8_t mode, layer; } DpUb;
 #define DP_UB 8
 typedef struct DpBlob { int ngroups, nub; DpUb ub[DP_UB]; DpGroup g[1]; } DpBlob;
@@ -8614,6 +8695,92 @@ int GsGpu_DsSil(int ctx, uint32_t count, const float *c, const void *plan) {
    the texture layer of its part), each in runs of the same state. */
 /* the kept parts' draws, from the items given (the drawing thread's own, or the render thread's copy) */
 unsigned gVitaOrderRuns[2]; /* for the log: runs begun anew to keep the order, draws put with an earlier run */
+#ifdef PORT_R36S
+unsigned gR36Dpb[3]; /* for the log: parts drawn batched, the draws they took, draws a part alone (no room / clash) */
+static void dpb_range(DpGroup *g) { /* (the vertices the group's indices reach) */
+    const uint16_t *ix;
+    uint32_t q, lo = 0xFFFFFFFFu, hi = 0;
+    if (g->rngN == g->icount) {
+        return;
+    }
+    ix = g->iptr != NULL ? g->iptr : (const uint16_t *)(const void *)(sDpIboPtr + g->ioff);
+    for (q = 0; q < g->icount; q++) {
+        uint32_t v = ix[q];
+        lo = v < lo ? v : lo;
+        hi = v > hi ? v : hi;
+    }
+    g->vlo = lo;
+    g->vhi = hi;
+    g->rngN = g->icount;
+}
+static float sDpbU[DPB_FT_SLOT * DPB_FT_K * 4 > DPB_ST_SLOT * DPB_ST_K * 4 ? DPB_FT_SLOT * DPB_FT_K * 4 : DPB_ST_SLOT * DPB_ST_K * 4];
+static void dpb_flush(int n, int slot, const uint16_t *const *src, const uint32_t *cnt, uint32_t total, const Variant *var) {
+    uint16_t *ix, *o;
+    int k;
+    if (n == 0) {
+        return;
+    }
+    sDpbU[(slot - 1) * 4 + 2] = (float)n; /* (slot 0's range: how many slots hold parts) */
+    ix = (uint16_t *)vglAllocFromScratch(total * 2);
+    glUniform4fv(var->u[0], n * slot, sDpbU);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    if (ix != NULL) {
+        for (o = ix, k = 0; k < n; k++) {
+            memcpy(o, src[k], cnt[k] * 2);
+            o += cnt[k];
+        }
+        glDrawElements(GL_TRIANGLES, (GLsizei)total, GL_UNSIGNED_SHORT, ix);
+        gR36Dpb[1]++;
+    } else { /* (no scratch memory left this picture: one by one, each still finding its slot) */
+        for (k = 0; k < n; k++) {
+            glDrawElements(GL_TRIANGLES, (GLsizei)cnt[k], GL_UNSIGNED_SHORT, src[k]);
+            gR36Dpb[1]++;
+        }
+    }
+    gR36Dpb[0] += (unsigned)n;
+}
+static void dp_draw_batched(DpItem *items, int first, int mode, const Variant *var) {
+    const int slot = mode == 1 ? DPB_FT_SLOT : DPB_ST_SLOT, K = mode == 1 ? DPB_FT_K : DPB_ST_K, nu = slot - 1;
+    const uint16_t *src[DPB_ST_K];
+    uint32_t cnt[DPB_ST_K], total = 0;
+    int n = 0, q;
+    for (q = first;; q = items[q].next) {
+        DpGroup *g = q >= 0 ? (DpGroup *)(uintptr_t)items[q].g : NULL;
+        int k, clash = 0;
+        if (g != NULL && g->icount == 0) {
+            continue;
+        }
+        if (g != NULL) {
+            dpb_range(g);
+            for (k = 0; k < n; k++) {
+                const float *r = &sDpbU[(k * slot + nu) * 4];
+                if (!((float)g->vhi < r[0] || (float)g->vlo > r[1])) {
+                    clash = 1;
+                    gR36Dpb[2]++;
+                    break;
+                }
+            }
+        }
+        if (n > 0 && (g == NULL || clash || n == K || total + g->icount > 98304u)) {
+            dpb_flush(n, slot, src, cnt, total, var);
+            n = 0;
+            total = 0;
+        }
+        if (g == NULL) {
+            break;
+        }
+        memcpy(&sDpbU[n * slot * 4], items[q].u, (size_t)nu * 16u);
+        sDpbU[(n * slot + nu) * 4 + 0] = (float)g->vlo;
+        sDpbU[(n * slot + nu) * 4 + 1] = (float)g->vhi;
+        sDpbU[(n * slot + nu) * 4 + 2] = 0.0f;
+        sDpbU[(n * slot + nu) * 4 + 3] = 0.0f;
+        src[n] = g->iptr != NULL ? g->iptr : (const uint16_t *)(const void *)(sDpIboPtr + g->ioff);
+        cnt[n] = g->icount;
+        total += g->icount;
+        n++;
+    }
+}
+#endif
 static void dp_draw_items(DpItem *items, int n, int prof) {
     static struct { State st; uint32_t h; int mode, first, last; } bk[512];
     static int16_t bhead[512], bnext[512]; /* (the runs found by their number, not one after the other) */
@@ -8696,7 +8863,15 @@ static void dp_draw_items(DpItem *items, int n, int prof) {
             /* a fighter drawn into the alpha only (seen through, GfxAlphaKey): the texture's alpha as it is
                (the GS's byte, 0xF4..0xFE), which the picture's alpha cannot hold in its usual scale (0x80 = 1) */
             int raw = mode == 1 && s->mask == 8 && (fm == 1 || fm == 2) && !tst;
-            const Variant *var = variant(kind, fm | tst << 2 | (sNoProj && fm ? 8 : 0) | (raw ? 512 : gVglLean ? 32 : 0));
+            int vflags = fm | tst << 2 | (sNoProj && fm ? 8 : 0) | (raw ? 512 : gVglLean ? 32 : 0);
+            const Variant *var = NULL;
+#ifdef PORT_R36S
+            if (sVsKind[kind + 2] != 0 && sDpUSize[mode == 1 ? 0 : 1] == (mode == 1 ? 23u : 6u) * 16u) {
+                var = variant(kind + 2, vflags);
+            }
+            if (var == NULL)
+#endif
+            var = variant(kind, vflags);
             uint32_t usize = sDpUSize[mode == 1 ? 0 : 1];
             int newProg;
             if (var == NULL) {
@@ -8749,6 +8924,11 @@ static void dp_draw_items(DpItem *items, int n, int prof) {
             {
                 unsigned long long d0 = sceKernelGetProcessTimeWide();
                 ZM(41);
+#ifdef PORT_R36S
+                if (var->bk) {
+                    dp_draw_batched(items, bk[i].first, mode, var);
+                } else
+#endif
                 if (vglFastPrepare(GL_UNSIGNED_SHORT)) {
                     ZM(42);
                     /* The stage's groups of one state with the same constants (parts placed in the world as they

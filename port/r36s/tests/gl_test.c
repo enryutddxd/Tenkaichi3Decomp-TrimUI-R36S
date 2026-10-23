@@ -311,6 +311,49 @@ static void *drawer(void *arg) {
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     }
 
+    /* 7c. the R36S's batched direct path (vita_vgl.c dp_draw_batched): two parts in one draw, each with its own
+       constants in its own slot, found by the vertex's number; a slot's scale 0 puts its part away */
+    {
+        GLuint pb = prog("kVertStB", "variant_0000", "aPos", "aCol", "aTex");
+        static float vb[8][8];
+        static const uint16_t kIx[12] = {0, 1, 2, 1, 3, 2, 4, 5, 6, 5, 7, 6};
+        const float xy[8][2] = {{-1, -1}, {0, -1}, {-1, 1}, {0, 1}, {0, -1}, {1, -1}, {0, 1}, {1, 1}};
+        uint32_t red = 0x80000080u;
+        float U[2][7][4];
+        GLint loc = glGetUniformLocation(pb, "U");
+        for (int i = 0; i < 8; i++) {
+            vb[i][0] = xy[i][0]; vb[i][1] = xy[i][1]; vb[i][2] = 0; vb[i][3] = 1; vb[i][4] = 0; vb[i][5] = 0;
+            memcpy(&vb[i][6], &red, 4);
+        }
+        memset(U, 0, sizeof(U));
+        for (int k = 0; k < 2; k++) {
+            for (int j = 0; j < 4; j++) { U[k][j][j] = 1; }
+            U[k][6][0] = (float)(k * 4); U[k][6][1] = (float)(k * 4 + 3);
+        }
+        U[0][6][2] = 2; /* (two slots) */
+        U[0][4][0] = U[0][4][1] = U[0][4][2] = U[0][4][3] = 1; /* slot 0 drawn, slot 1 scale 0: put away */
+        glUseProgram(pb);
+        glUniform4f(glGetUniformLocation(pb, "uTest"), 0, 0, 0, 0);
+        glUniform4fv(loc, 14, &U[0][0][0]);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 32, &vb[0][0]);
+        glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, 32, &vb[0][6]);
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 32, &vb[0][4]);
+        glDrawElements(GL_TRIANGLES, 12, GL_UNSIGNED_SHORT, kIx);
+        CHECK(px_at(100, 240) == RED && px_at(540, 240) != RED, "batched parts: slot 0's part drawn, slot 1's put away: %08x %08x", px_at(100, 240), px_at(540, 240));
+        memset(U[0][4], 0, 16);
+        U[1][4][0] = U[1][4][1] = U[1][4][2] = U[1][4][3] = 1;
+        glUniform4fv(loc, 14, &U[0][0][0]);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glDrawElements(GL_TRIANGLES, 12, GL_UNSIGNED_SHORT, kIx);
+        CHECK(px_at(100, 240) != RED && px_at(540, 240) == RED, "batched parts: the other way round: %08x %08x", px_at(100, 240), px_at(540, 240));
+    }
+
     /* 8. the swap: the picture on the window, the right way up (red on top), and the callback */
     {
         V w[6];

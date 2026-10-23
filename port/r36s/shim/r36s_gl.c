@@ -324,6 +324,14 @@ void R36_GlTimes(FILE *f, double secs) {
         fprintf(f, "GL context: taken %.0f times a second, waiting for it %.1f ms a second, making it current %.1f ms a second (%.0f us each)\n",
                 c[0] / secs, c[1] / 1000.0 / secs, c[2] / 1000.0 / secs, c[0] ? (double)c[2] / (double)c[0] : 0.0);
     }
+    {
+        extern unsigned gR36Dpb[3], gR36Frames, gR36Draws; /* (vita_vgl.c: the batched direct path) */
+        static unsigned prev[5];
+        unsigned c[5] = {gR36Dpb[0] - prev[0], gR36Dpb[1] - prev[1], gR36Dpb[2] - prev[2], gR36Draws - prev[3], gR36Frames - prev[4]};
+        prev[0] = gR36Dpb[0]; prev[1] = gR36Dpb[1]; prev[2] = gR36Dpb[2]; prev[3] = gR36Draws; prev[4] = gR36Frames;
+        fprintf(f, "draws: %.0f a second, %.0f per picture (%.1f pictures a second) | model parts batched: %.0f a second in %.0f draws, %.0f clashes\n",
+                c[3] / secs, c[4] ? (double)c[3] / c[4] : 0.0, c[4] / secs, c[0] / secs, c[1] / secs, c[2] / secs);
+    }
     if (sGltOn != 1) {
         return;
     }
@@ -1173,6 +1181,7 @@ static void attr_restore(void) { /* the renderer's attributes 0..3 back as it se
 
 /* ---- draws ---- */
 unsigned gR36Draws;
+__attribute__((weak)) unsigned gR36Dpb[3]; /* (vita_vgl.c's; the tests have none) */
 static void pre_draw(void) {
     gR36Draws++;
     flush_dirty();
