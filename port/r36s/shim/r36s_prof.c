@@ -37,6 +37,8 @@ typedef struct {
     uint32_t lost, lostPrev, total, totalPrev;
     pid_t tid;
     int used;
+    volatile int btN;  /* (a snapshot of the calls: written by the thread itself on SIGURG, -1 asked) */
+    uintptr_t bt[24];
 } Slot;
 static Slot sSlot[SLOTS];
 static int sSlots;
@@ -146,6 +148,37 @@ static void note(void *ctx, uint32_t w) {
     s->lost += w;
 }
 #endif
+/* where a thread is now (one that waits gets no SIGPROF): pc, lr, then the frame records (fp -> saved fp, return) */
+static void on_bt(int sig, siginfo_t *si, void *ctx) {
+    int e = errno, n = 0;
+    Slot *s;
+    (void)sig; (void)si;
+    if (tSlot < 0) {
+        return;
+    }
+    s = &sSlot[tSlot];
+#ifdef __aarch64__
+    {
+        ucontext_t *uc = (ucontext_t *)ctx;
+        uintptr_t fp = uc->uc_mcontext.regs[29];
+        s->bt[n++] = uc->uc_mcontext.pc;
+        s->bt[n++] = uc->uc_mcontext.regs[30];
+        while (n < 24 && fp >= tLo && fp + 16 <= tHi && (fp & 7) == 0) {
+            uintptr_t next = ((const uintptr_t *)fp)[0], ret = ((const uintptr_t *)fp)[1];
+            s->bt[n++] = ret;
+            if (next <= fp) {
+                break;
+            }
+            fp = next;
+        }
+    }
+#else
+    (void)ctx;
+#endif
+    __sync_synchronize();
+    s->btN = n;
+    errno = e;
+}
 static void on_sig(int sig, siginfo_t *si, void *ctx) {
     int e = errno;
     /* (the kernel looks at a thread's processor time at its clock ticks, every 4 or 10 ms: one signal then for the
@@ -403,6 +436,51 @@ static void report(FILE *f, double t0, double t1) {
     }
     fflush(f);
 }
+/* (each report) the calls the game's threads are in right now */
+static void snapshots(FILE *f) {
+    int i, k;
+    for (i = 0; i < sSlots; i++) {
+        Slot *s = &sSlot[i];
+        char name[32] = "?", path[64];
+        FILE *g;
+        snprintf(path, sizeof(path), "/proc/self/task/%d/comm", (int)s->tid);
+        if ((g = fopen(path, "r")) == NULL) {
+            continue;
+        }
+        if (fgets(name, sizeof(name), g) != NULL) {
+            name[strcspn(name, "\n")] = 0;
+        }
+        fclose(g);
+        if (strncmp(name, "bt3_", 4) != 0 || strcmp(name, "bt3_prof") == 0) {
+            continue;
+        }
+        s->btN = -1;
+        __sync_synchronize();
+        if (syscall(SYS_tgkill, getpid(), s->tid, SIGURG) != 0) {
+            continue;
+        }
+        for (k = 0; k < 50 && s->btN < 0; k++) {
+            struct timespec d = {0, 2000000L};
+            nanosleep(&d, NULL);
+        }
+        if (s->btN <= 0) {
+            fprintf(f, "  now: thread %s (%d): no answer\n", name, (int)s->tid);
+            continue;
+        }
+        fprintf(f, "  now: thread %s (%d):", name, (int)s->tid);
+        for (k = 0; k < s->btN; k++) {
+            const char *nm = s->bt[k] >> 32 || !in_text(s->bt[k]) ? NULL : name_of((uint32_t)s->bt[k]);
+            if (nm != NULL) {
+                fprintf(f, " %s%s", k ? "<- " : "", nm);
+            } else {
+                Dl_info di;
+                memset(&di, 0, sizeof(di));
+                fprintf(f, " %s%s", k ? "<- " : "", dladdr((void *)s->bt[k], &di) && di.dli_sname ? di.dli_sname : "(lib)");
+            }
+        }
+        fprintf(f, "\n");
+    }
+}
 static double now_s(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
@@ -426,6 +504,8 @@ static void *dump_thread(void *arg) {
         }
         t1 = now_s() - sStart;
         report(f, t0, t1);
+        snapshots(f);
+        fflush(f);
         t0 = t1;
     }
     return NULL;
@@ -459,6 +539,8 @@ void R36_ProfThread(void) {
         sa.sa_flags = SA_SIGINFO | SA_RESTART;
         text_range();
         sigaction(SIGPROF, &sa, NULL);
+        sa.sa_sigaction = on_bt;
+        sigaction(SIGURG, &sa, NULL);
         sStart = now_s();
         handler = 1;
     }
