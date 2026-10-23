@@ -55,11 +55,25 @@ export LD_LIBRARY_PATH="$GAMEDIR/libs:/usr/trimui/lib:/usr/lib:$LD_LIBRARY_PATH"
 export MALLOC_ARENA_MAX=1
 unset SDL_BLITTER_DISABLED
 
-# the processor at its full speed while the game runs (put back afterwards)
-OLDGOV=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)
-for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-  echo performance > "$g" 2>/dev/null || $ESUDO sh -c "echo performance > $g" 2>/dev/null
+# the processor at its full speed while the game runs (put back afterwards): the governor, and the lowest and
+# highest speed it may pick both at the top one (the system's menu leaves the highest at 1.2 GHz; the chip goes to 2.0)
+CF=/sys/devices/system/cpu/cpu0/cpufreq
+OLDGOV=$(cat $CF/scaling_governor 2>/dev/null)
+OLDMIN=$(cat $CF/scaling_min_freq 2>/dev/null)
+OLDMAX=$(cat $CF/scaling_max_freq 2>/dev/null)
+TOP=$(cat $CF/cpuinfo_max_freq 2>/dev/null)
+for f in $(cat $CF/scaling_available_frequencies 2>/dev/null); do
+  [ "$f" -gt "${TOP:-0}" ] 2>/dev/null && TOP=$f
 done
+[ -n "$BT3_CPU_KHZ" ] && TOP=$BT3_CPU_KHZ
+for c in /sys/devices/system/cpu/cpu*/cpufreq; do
+  echo performance > "$c/scaling_governor" 2>/dev/null || $ESUDO sh -c "echo performance > $c/scaling_governor" 2>/dev/null
+  if [ -n "$TOP" ]; then
+    echo "$TOP" > "$c/scaling_max_freq" 2>/dev/null
+    echo "$TOP" > "$c/scaling_min_freq" 2>/dev/null
+  fi
+done
+echo "processor: top $TOP kHz; min $(cat $CF/scaling_min_freq 2>/dev/null) max $(cat $CF/scaling_max_freq 2>/dev/null) (were $OLDMIN $OLDMAX)"
 for g in /sys/class/devfreq/*/governor; do
   [ -f "$g" ] && echo performance > "$g" 2>/dev/null
 done
@@ -73,6 +87,7 @@ fi
 free -m 2>/dev/null | head -2
 ./bt3
 STATUS=$?
+echo "temperatures: $(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | tr '\n' ' '); processor now $(cat $CF/scaling_cur_freq 2>/dev/null) kHz"
 echo "bt3 ended: status $STATUS (137: stopped by the system, out of memory?; 139: crash; 135: bus error)"
 free -m 2>/dev/null | head -2
 if [ $STATUS -ge 128 ]; then
@@ -80,8 +95,10 @@ if [ $STATUS -ge 128 ]; then
 fi
 
 kill -9 $(pidof gptokeyb) 2>/dev/null
-for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-  [ -n "$OLDGOV" ] && echo "$OLDGOV" > "$g" 2>/dev/null
+for c in /sys/devices/system/cpu/cpu*/cpufreq; do
+  [ -n "$OLDMIN" ] && echo "$OLDMIN" > "$c/scaling_min_freq" 2>/dev/null
+  [ -n "$OLDMAX" ] && echo "$OLDMAX" > "$c/scaling_max_freq" 2>/dev/null
+  [ -n "$OLDGOV" ] && echo "$OLDGOV" > "$c/scaling_governor" 2>/dev/null
 done
 if type pm_finish >/dev/null 2>&1; then
   pm_finish
