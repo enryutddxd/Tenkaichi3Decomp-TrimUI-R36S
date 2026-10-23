@@ -74,6 +74,8 @@ R36_REAL_LIST
 /* ---- the state as the driver has it: a call that would set what is already set is left out (the renderer sets
    the same buffer, attribute pointers and program again and again: some 30000 calls a second into the driver) ---- */
 #define R_UNK 0xFFFFFFFFu
+/* the changes of state the driver sees, for the log: programs, framebuffers, textures, buffers, uniform bytes, capabilities */
+unsigned long long gR36Chg[6];
 typedef struct RAttr { GLuint buf; GLint size; GLenum type; GLboolean norm; GLsizei stride; const void *ptr; signed char valid, on; } RAttr;
 static GLuint rBuf[2] = {R_UNK, R_UNK}, rProg = R_UNK, rFbo = R_UNK;
 static RAttr rAt[8];
@@ -93,6 +95,7 @@ static inline void r_bind(GLenum t, GLuint b) {
     } else if (rBuf[k] != b) {
         p_glBindBuffer(t, b);
         rBuf[k] = b;
+        gR36Chg[3]++;
     }
 }
 static inline void r_vap(GLuint i, GLint size, GLenum type, GLboolean norm, GLsizei stride, const void *ptr) {
@@ -126,12 +129,14 @@ static inline void r_use(GLuint p) {
     if (rProg != p) {
         p_glUseProgram(p);
         rProg = p;
+        gR36Chg[0]++;
     }
 }
 static inline void r_fbo(GLuint f) {
     if (rFbo != f) {
         p_glBindFramebuffer(GL_FRAMEBUFFER, f);
         rFbo = f;
+        gR36Chg[1]++;
     }
 }
 
@@ -250,7 +255,12 @@ static GlT sGlT[GLT_MAX], sGlTPrev[GLT_MAX];
 static int sGlTn;
 static pthread_mutex_t sGlTLock = PTHREAD_MUTEX_INITIALIZER;
 unsigned long long R36_NowNs(void); /* (r36s_psp2.c: the processor's counter) */
-#define glt_now R36_NowNs
+static inline unsigned long long glt_now(void) { /* (the system's clock itself: R36_NowNs may be a 0.5 ms tick) */
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (unsigned long long)t.tv_sec * 1000000000ull + (unsigned long long)t.tv_nsec;
+}
+
 static int sGltOn = -1;
 static inline unsigned long long glt_start(void) {
     if (__builtin_expect(sGltOn == 0, 1)) {
@@ -258,7 +268,11 @@ static inline unsigned long long glt_start(void) {
     }
     if (sGltOn < 0) {
         const char *e = getenv("R36_GLTIME");
+#ifdef PORT_TSP /* (the TrimUI's test builds: on unless R36_GLTIME=0) */
+        sGltOn = e == NULL || atoi(e) != 0;
+#else
         sGltOn = e != NULL && atoi(e) != 0;
+#endif
         if (!sGltOn) {
             return 0;
         }
@@ -334,11 +348,22 @@ void R36_GlTimes(FILE *f, double secs) {
         fprintf(f, "draws: %.0f a second, %.0f per picture (%.1f pictures a second) | model parts batched: %.0f a second in %.0f draws, %.0f clashes\n",
                 c[3] / secs, c[4] ? (double)c[3] / c[4] : 0.0, c[4] / secs, c[0] / secs, c[1] / secs, c[2] / secs);
     }
+    {
+        static unsigned long long prev[6];
+        unsigned long long c[6];
+        int j;
+        for (j = 0; j < 6; j++) {
+            c[j] = gR36Chg[j] - prev[j];
+            prev[j] = gR36Chg[j];
+        }
+        fprintf(f, "state changes a second: programs %.0f, framebuffers %.0f, textures bound %.0f, buffers bound %.0f, uniform KB %.0f, blend/depth/other %.0f\n",
+                c[0] / secs, c[1] / secs, c[2] / secs, c[3] / secs, c[4] / 1024.0 / secs, c[5] / secs);
+    }
     if (sGltOn != 1) {
         return;
     }
     fprintf(f, "GL calls on the clock (waiting included), ms per second: ");
-    for (i = 0; i < k && i < 14; i++) {
+    for (i = 0; i < k && i < 30; i++) {
         fprintf(f, "%s%s %.1f (%u calls/s, longest %.1f ms, %u over 2 ms)", i ? "; " : "", strncmp(d[i].name, "r36_", 4) == 0 ? d[i].name + 4 : d[i].name, d[i].ns / 1e6 / secs, (unsigned)(d[i].n / secs),
                 d[i].max / 1e6, d[i].slow);
     }
@@ -676,6 +701,7 @@ void r36_glBindTexture(GLenum target, GLuint t) {
     ENTER();
     sBound[sUnit & 3] = t;
     p_glBindTexture(target, real_tex(t));
+    gR36Chg[2]++;
     LEAVE();
 }
 void r36_glActiveTexture(GLenum u) {
@@ -873,6 +899,7 @@ static void cap(GLenum c, int on) {
     } else {
         p_glDisable(c);
     }
+    gR36Chg[5]++;
 }
 void r36_glEnable(GLenum c) { ENTER(); cap(c, 1); LEAVE(); }
 void r36_glDisable(GLenum c) { ENTER(); cap(c, 0); LEAVE(); }
@@ -1369,6 +1396,7 @@ void vglFastDraw(GLenum type, uint32_t offset, uint32_t count, const void *vunif
     pre_draw();
     if (p != NULL && p->u >= 0) {
         p_glUniform4fv(p->u, (GLsizei)(size / 16u), (const GLfloat *)vunif);
+        gR36Chg[4] += size;
     }
     r_bind(GL_ELEMENT_ARRAY_BUFFER, sElemBuf);
     p_glDrawElements(GL_TRIANGLES, (GLsizei)count, type, (const void *)(uintptr_t)offset);
@@ -1380,6 +1408,7 @@ void vglFastDrawPtr(GLenum type, const void *idx, uint32_t count, const void *vu
     pre_draw();
     if (p != NULL && p->u >= 0) {
         p_glUniform4fv(p->u, (GLsizei)(size / 16u), (const GLfloat *)vunif);
+        gR36Chg[4] += size;
     }
     {   /* (the indices into the stream, else from main memory; the renderer's own put back at the next draw that needs it) */
         long at = R36_Stream(idx, (size_t)count * (type == GL_UNSIGNED_INT ? 4u : type == GL_UNSIGNED_BYTE ? 1u : 2u));
