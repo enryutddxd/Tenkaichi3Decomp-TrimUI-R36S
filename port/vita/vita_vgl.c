@@ -2386,7 +2386,12 @@ static void rt_sync(void) {
                 if (sRtTail != lastTail) {
                     lastTail = sRtTail;
                     moved = now;
+#ifdef PORT_R36S /* (the render thread is not stopped by a system here: the drawing thread never takes its work, which
+                    left the drawing thread with the GL context while the render thread waited for it, the next packet) */
+                } else if (0) {
+#else
                 } else if (now - moved > 2000 && rt_exec_one()) {
+#endif
                     gVitaRt[7]++;
                     lastTail = sRtTail;
                     continue;
