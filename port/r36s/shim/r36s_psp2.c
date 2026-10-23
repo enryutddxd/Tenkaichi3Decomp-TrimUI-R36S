@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <ucontext.h>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <sched.h>
@@ -822,6 +823,69 @@ static void crash(int sig, siginfo_t *si, void *ctx) {
     n = snprintf(b, sizeof(b), "r36: CRASH: signal %d, address %p\n", sig, si->si_addr);
     put(fd, b, n);
 #endif
+    {   /* where pc, lr, sp and the address lie: the program's memory map, and the names of library functions */
+        static char maps[65536];
+        int mf = open("/proc/self/maps", O_RDONLY), mn = 0, r;
+        unsigned long want[4];
+        const char *what[4] = {"pc", "lr", "sp", "addr"};
+#ifdef __arm__
+        want[0] = m->arm_pc; want[1] = m->arm_lr; want[2] = m->arm_sp; want[3] = (unsigned long)si->si_addr;
+#else
+        want[0] = want[1] = want[2] = want[3] = 0;
+#endif
+        while (mf >= 0 && mn < (int)sizeof(maps) - 1 && (r = (int)read(mf, maps + mn, sizeof(maps) - 1 - (size_t)mn)) > 0) {
+            mn += r;
+        }
+        if (mf >= 0) {
+            close(mf);
+        }
+        maps[mn] = 0;
+        for (int w = 0; w < 4; w++) {
+            char *l = maps;
+            Dl_info di;
+            while (l && *l) {
+                char *e = strchr(l, '\n');
+                unsigned long lo = strtoul(l, NULL, 16), hi = strtoul(strchr(l, '-') + 1, NULL, 16);
+                if (want[w] >= lo && want[w] < hi) {
+                    n = snprintf(b, sizeof(b), "  %s %08lx in: %.*s (+%lx)\n", what[w], want[w], e ? (int)(e - l) : (int)strlen(l), l, want[w] - lo);
+                    put(fd, b, n);
+                    break;
+                }
+                l = e ? e + 1 : NULL;
+            }
+            memset(&di, 0, sizeof(di));
+            if (w < 2 && dladdr((void *)want[w], &di) && di.dli_fname != NULL) {
+                n = snprintf(b, sizeof(b), "  %s = %s + %lx (%s, loaded at %p)\n", what[w], di.dli_sname ? di.dli_sname : "?",
+                             di.dli_saddr ? want[w] - (unsigned long)di.dli_saddr : 0ul, di.dli_fname, di.dli_fbase);
+                put(fd, b, n);
+            }
+        }
+#ifdef __arm__
+        {   /* the instruction's bytes */
+            const unsigned char *pc = (const unsigned char *)(m->arm_pc & ~1ul);
+            n = snprintf(b, sizeof(b), "  code at pc-8:");
+            for (int i = -8; i < 8; i++) {
+                n += snprintf(b + n, sizeof(b) - (size_t)n, " %02x", pc[i]);
+            }
+            n += snprintf(b + n, sizeof(b) - (size_t)n, "\n");
+            put(fd, b, n);
+        }
+        {   /* the words around sp that point into any code */
+            const unsigned long *sp = (const unsigned long *)m->arm_sp;
+            n = snprintf(b, sizeof(b), "  code addresses on the stack from sp:");
+            for (int i = 0, k2 = 0; i < 512 && k2 < 32; i++) {
+                unsigned long v = sp[i];
+                Dl_info d2;
+                if ((v >= (unsigned long)__executable_start && v < (unsigned long)etext) || (v > 0xe0000000ul && dladdr((void *)v, &d2) && d2.dli_sname)) {
+                    n += snprintf(b + n, sizeof(b) - (size_t)n, " %08lx", v);
+                    k2++;
+                }
+            }
+            n += snprintf(b + n, sizeof(b) - (size_t)n, "\n");
+            put(fd, b, n);
+        }
+#endif
+    }
     put(fd, "  the log's last lines:\n", 24);
     Vita_CrashLog(fd);
     if (fd >= 0) {
