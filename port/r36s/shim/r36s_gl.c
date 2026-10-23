@@ -1379,9 +1379,29 @@ static void attr_restore(void) { /* the renderer's attributes 0..3 back as it se
 /* ---- draws ---- */
 unsigned gR36Draws;
 __attribute__((weak)) unsigned gR36Dpb[3]; /* (vita_vgl.c's; the tests have none) */
+/* (for prof.txt) the draws by the place in the renderer that asked for them: a return address and its count, and
+   the time the driver took for them */
+#define DSITE 64
+unsigned gR36SiteA[DSITE], gR36SiteN[DSITE];
+unsigned long long gR36SiteNs[DSITE];
+static __thread uintptr_t tSite;
+static inline void site_note(uintptr_t a) { tSite = a; }
+static void site_add(unsigned long long ns) {
+    uint32_t a = (uint32_t)tSite, h = (a * 2654435761u) >> 26, k;
+    for (k = 0; k < DSITE; k++) {
+        unsigned j = (h + k) & (DSITE - 1);
+        if (gR36SiteA[j] == a || gR36SiteA[j] == 0) {
+            gR36SiteA[j] = a;
+            gR36SiteN[j]++;
+            gR36SiteNs[j] += ns;
+            return;
+        }
+    }
+}
 static unsigned long long draw_t0(void) { return glt_now(); }
 static void draw_done(unsigned long long t0) {
     unsigned long long d = glt_now() - t0;
+    site_add(d);
     unsigned e = sEv & (EV_N - 1);
     sAllN[e]++;
     sAllNs[e] += d;
@@ -1440,6 +1460,7 @@ static void ff_end(void) {
 }
 void r36_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
     ENTER();
+    site_note((uintptr_t)__builtin_return_address(0));
     pre_draw();
     if (sCurProg == 0) {
         ff_begin();
@@ -1452,6 +1473,7 @@ void r36_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
 }
 void r36_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *idx) {
     ENTER();
+    site_note((uintptr_t)__builtin_return_address(0));
     pre_draw();
     if (sCurProg == 0) {
         ff_begin();
@@ -1485,6 +1507,7 @@ void r36_glLoadIdentity(void) { }
 GLboolean vglFastPrepare(GLenum type) { (void)type; return sCurProg != 0 && sElemBuf != 0; }
 void vglFastDraw(GLenum type, uint32_t offset, uint32_t count, const void *vunif, uint32_t size) {
     ENTER();
+    site_note((uintptr_t)__builtin_return_address(0));
     Prog *p = (int)sCurProg < sProgCap ? &sProg[sCurProg] : NULL;
     pre_draw();
     if (p != NULL && p->u >= 0) {
@@ -1497,6 +1520,7 @@ void vglFastDraw(GLenum type, uint32_t offset, uint32_t count, const void *vunif
 }
 void vglFastDrawPtr(GLenum type, const void *idx, uint32_t count, const void *vunif, uint32_t size) {
     ENTER();
+    site_note((uintptr_t)__builtin_return_address(0));
     Prog *p = (int)sCurProg < sProgCap ? &sProg[sCurProg] : NULL;
     pre_draw();
     if (p != NULL && p->u >= 0) {

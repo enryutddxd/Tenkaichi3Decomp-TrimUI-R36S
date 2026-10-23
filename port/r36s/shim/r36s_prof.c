@@ -506,6 +506,37 @@ static void *dump_thread(void *arg) {
         t1 = now_s() - sStart;
         report(f, t0, t1);
         snapshots(f);
+        {   /* the draws by where they were asked for (r36s_gl.c), the most first */
+            extern unsigned gR36SiteA[64], gR36SiteN[64];
+            extern unsigned long long gR36SiteNs[64];
+            static unsigned pn[64];
+            static unsigned long long pns[64];
+            unsigned dn[64], idx[64], j, k, m = 0;
+            unsigned long long dns[64];
+            double secs = 10.0;
+            for (j = 0; j < 64; j++) {
+                dn[j] = gR36SiteN[j] - pn[j]; pn[j] = gR36SiteN[j];
+                dns[j] = gR36SiteNs[j] - pns[j]; pns[j] = gR36SiteNs[j];
+                if (dn[j] != 0) {
+                    idx[m++] = j;
+                }
+            }
+            for (j = 1; j < m; j++) {
+                unsigned x = idx[j];
+                int q = (int)j - 1;
+                while (q >= 0 && dns[idx[q]] < dns[x]) {
+                    idx[q + 1] = idx[q];
+                    q--;
+                }
+                idx[q + 1] = x;
+            }
+            fprintf(f, "  draws by where asked (a second: count, driver ms):");
+            for (k = 0; k < m && k < 14; k++) {
+                const char *nm = name_of(gR36SiteA[idx[k]]);
+                fprintf(f, " %s %.0f %.0f;", nm ? nm : "?", dn[idx[k]] / secs, dns[idx[k]] / 1e6 / secs);
+            }
+            fprintf(f, "\n");
+        }
         { extern void R36_GameState(FILE *f); R36_GameState(f); }
         gR36ProfWindow++;
         fflush(f);
