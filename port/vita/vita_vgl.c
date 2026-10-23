@@ -1525,7 +1525,11 @@ int GsGpu_Init(void) {
            bt3.txt rt=1: tried (test 12), the drawing thread waited for it at each picture's end and the fights ran no
            faster and less evenly (the render thread is the one short of time there: the driver's work per draw) */
         const char *e = getenv("R36_RT");
+#ifdef PORT_TSP /* (the TrimUI: on unless bt3.txt rt=0; four cores, and the driver's share of the drawing thread is large) */
+        if (e != NULL && atoi(e) == 0) {
+#else
         if (e == NULL || atoi(e) == 0) {
+#endif
             gVglSafe2 |= 2;
         }
     }
