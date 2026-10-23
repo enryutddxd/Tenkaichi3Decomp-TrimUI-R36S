@@ -1233,6 +1233,8 @@ static void read_settings(void) {
             if (sscanf(eq, "%dx%d", &w, &h) == 2 && w >= 160 && h >= 120 && w <= 1920 && h <= 1080) {
                 if (line[0] == 'r') { gR36FightW = w; gR36FightH = h; } else { gR36MenuW = w; gR36MenuH = h; }
             }
+        } else if (strcmp(line, "bench") == 0) { /* (TrimUI) the driver's costs measured at start (r36s_bench.c) */
+            setenv("R36_BENCH", eq, 1);
         } else if (strcmp(line, "vsync") == 0) {
             setenv("R36_VSYNC", eq, 1);
         } else if (strcmp(line, "pin") == 0) {

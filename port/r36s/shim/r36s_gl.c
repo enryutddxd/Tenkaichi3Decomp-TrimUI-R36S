@@ -685,6 +685,13 @@ int R36_VideoInit(void) {
         p_glGetIntegerv(GL_MAX_VARYING_VECTORS, &c);
         R36_LogLine("r36: vertex uniform vectors %d, texture size %d, varyings %d\n", a, b, c);
     }
+    {   /* (TrimUI test build) the driver's costs measured once at start, into the log (r36s_bench.c); R36_BENCH=0: not */
+        const char *e = getenv("R36_BENCH");
+        if (e == NULL || atoi(e) != 0) {
+            extern void R36_Bench(void);
+            R36_Bench();
+        }
+    }
     sFFProg = mk_prog(kFFVert, kFFFrag);
     sFFU[0] = p_glGetUniformLocation(sFFProg, "r36_flip");
     sFFU[1] = p_glGetUniformLocation(sFFProg, "uColor");
