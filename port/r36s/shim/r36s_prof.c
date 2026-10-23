@@ -31,6 +31,7 @@ void R36_LogLine(const char *fmt, ...);
 #define ENTRIES 8192 /* (a power of two) */
 typedef struct { uint32_t pc, c1, c2, n; } Ent;
 typedef struct {
+    unsigned long long ut, st, mf, vcs, ivcs; /* (the system's counts at the last report: user / system ticks, page faults, switches) */
     Ent *e;
     uint32_t *prev; /* (the counts at the last report) */
     uint32_t lost, lostPrev, total, totalPrev;
@@ -293,6 +294,37 @@ static void clocks(FILE *f) {
 }
 #define AGG 3000
 static Agg sSelf[AGG], sIncl[AGG];
+/* the system's own counts for a thread: user and system time (ticks), minor page faults, context switches */
+static void task_stat(pid_t tid, unsigned long long *ut, unsigned long long *st, unsigned long long *mf, unsigned long long *vcs, unsigned long long *ivcs) {
+    char path[64], b[1024], *p;
+    FILE *g;
+    int field;
+    *ut = *st = *mf = *vcs = *ivcs = 0;
+    snprintf(path, sizeof(path), "/proc/self/task/%d/stat", (int)tid);
+    if ((g = fopen(path, "r")) != NULL) {
+        if (fgets(b, sizeof(b), g) != NULL && (p = strrchr(b, ')')) != NULL) {
+            /* after the name: state is field 3; minflt 10, utime 14, stime 15 */
+            for (field = 2; *p && field < 15;) {
+                if (*p == ' ') {
+                    field++;
+                    if (field == 10) { *mf = strtoull(p + 1, NULL, 10); }
+                    if (field == 14) { *ut = strtoull(p + 1, NULL, 10); }
+                    if (field == 15) { *st = strtoull(p + 1, NULL, 10); }
+                }
+                p++;
+            }
+        }
+        fclose(g);
+    }
+    snprintf(path, sizeof(path), "/proc/self/task/%d/status", (int)tid);
+    if ((g = fopen(path, "r")) != NULL) {
+        while (fgets(b, sizeof(b), g) != NULL) {
+            if (strncmp(b, "voluntary_ctxt_switches:", 24) == 0) { *vcs = strtoull(b + 24, NULL, 10); }
+            if (strncmp(b, "nonvoluntary_ctxt_switches:", 27) == 0) { *ivcs = strtoull(b + 27, NULL, 10); }
+        }
+        fclose(g);
+    }
+}
 static void report(FILE *f, double t0, double t1) {
     int i, k;
     double secs = t1 - t0;
@@ -340,6 +372,14 @@ static void report(FILE *f, double t0, double t1) {
         if (tot * 100 < (uint32_t)(secs * 1000) * 2) { /* (under 2% of a core: only the line) */
             fprintf(f, "thread %s (%d): %u ms\n", name, (int)s->tid, tot);
             continue;
+        }
+        {
+            unsigned long long ut, st, mf, vcs, ivcs;
+            long hz = sysconf(_SC_CLK_TCK);
+            task_stat(s->tid, &ut, &st, &mf, &vcs, &ivcs);
+            fprintf(f, "  (the system: %.0f ms in the program, %.0f ms in the kernel, %llu page faults, %llu waits, %llu times put aside)\n",
+                    (ut - s->ut) * 1000.0 / hz, (st - s->st) * 1000.0 / hz, mf - s->mf, vcs - s->vcs, ivcs - s->ivcs);
+            s->ut = ut; s->st = st; s->mf = mf; s->vcs = vcs; s->ivcs = ivcs;
         }
         fprintf(f, "thread %s (%d): %u ms of processor in %.0f s (%.0f%% of a core)%s\n", name, (int)s->tid, tot, secs,
                 tot / (secs * 10.0), lost ? " (some samples not counted)" : "");

@@ -1068,6 +1068,19 @@ void R36_CrashHandlers(void) {
     }
     R36_ProfStart();
 }
+/* Large blocks from the C library's heap, not each its own mapping: glibc maps every block of 128 KB and more
+   separately and gives it back when freed, so a block the renderer takes and frees every picture cost a system call
+   each way and a page fault for every 4 KB it touched (the kernel clearing each page). Nor is the heap's top given back.
+   R36_MALLOC=0: the C library's defaults. */
+#include <malloc.h>
+__attribute__((constructor)) static void malloc_init(void) {
+    const char *e = getenv("R36_MALLOC");
+    if (e == NULL || atoi(e) != 0) {
+        mallopt(M_MMAP_THRESHOLD, 16 << 20);
+        mallopt(M_TRIM_THRESHOLD, 256 << 20);
+        mallopt(M_TOP_PAD, 4 << 20);
+    }
+}
 __attribute__((constructor)) static void crash_init(void) {
     struct sigaction sa;
     alt_stack();
