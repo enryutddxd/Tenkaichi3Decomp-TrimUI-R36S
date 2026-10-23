@@ -1107,6 +1107,13 @@ static int sTblState;          /* state_of_: the texture left out (a table pass:
 static GLuint sOlProg;
 static GLuint sOlTex[3];       /* (the display buffers as textures, below) */
 extern unsigned int gxm_back_buffer_index;
+/* (R36S / TrimUI) the picture's swap made by the render thread in its turn (sRtAsync): the drawing thread goes on
+   with the next list meanwhile, at most one picture ahead. Its own count of the display buffer it draws for
+   (sBackDraw), as the render thread's will be when it makes those draws. R36_ASYNC=0: as before. */
+static int sRtAsync;
+static unsigned sBackDraw;
+static volatile unsigned sRtSwapsSent, sRtSwapsDone;
+#define BACKI (sRtAsync ? sBackDraw : gxm_back_buffer_index)
 static int sTexXf;             /* the primitive's texture is a picture drawn here: its coordinates moved into it (put) */
 static float sTexXfV[4];       /* s' = [0] + s * [1], t' = [2] + t * [3] */
 extern unsigned gVitaOl[4];
@@ -1489,7 +1496,34 @@ static uint32_t wp_sig(void) {
     return h;
 }
 
+#ifdef PORT_R36S
+static void rt_fbegin_put(void);
+#endif
+static void frame_begin_gl(void) { /* (the thread that makes the GL calls) */
+    target_set(0);
+    GLC_RESET();
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_TRUE);
+    glStencilMask(0xFF);
+    glClearStencil(0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    glEnable(GL_SCISSOR_TEST);
+}
 static void frame_begin(void) {
+#ifdef PORT_R36S
+    if (sRtAsync) { /* (the render thread binds and clears in its turn, after the picture before: no waiting here) */
+        extern int Vita_InFight(void), Vita_InBattle(void);
+        extern int gVitaFilm, gVitaWtShot;
+        extern unsigned gVitaFilmPicsNext(void);
+        sMidOn = gVitaWtShot && gVitaFilm > 0 && Vita_InFight() && gVitaFilmPicsNext() % (unsigned)gVitaFilm == 0 ? 1 : 0;
+        vgl_bt3_split_on = Vita_InBattle() && !(gVglSafe2 & 1);
+        sSplitN = 0;
+        sSplitAt = vgl_bt3_split_on ? sceKernelGetProcessTimeWide() + SPLIT_MS * 1000ull : 0;
+        rt_fbegin_put();
+        return;
+    }
+#endif
     rt_sync();
     {   /* the frame about to be drawn is one the film takes: its middle too (wtshot=1) */
         extern int Vita_InFight(void);
@@ -2271,7 +2305,17 @@ unsigned long long gVitaWall[6];
 unsigned long long gVitaWallK[4][2]; /* draw submissions by kind: stage, fighters, other models, GS primitives: microseconds, count */
 static inline void *wt_map(GLenum t, GLenum a) { unsigned long long t0 = sceKernelGetProcessTimeWide(); void *r = glMapBuffer(t, a); gVitaWall[1] += sceKernelGetProcessTimeWide() - t0; return r; }
 static volatile int gVitaDrawWhere;
-static inline void wt_swap(void) { unsigned long long t0 = sceKernelGetProcessTimeWide(); rt_sync(); gVitaDrawWhere = 3; pace_swap(0); vglSwapBuffers(GL_FALSE); pace_swap(1); gVitaDrawWhere = 0; gVitaWall[0] += sceKernelGetProcessTimeWide() - t0; }
+#ifdef PORT_R36S
+static void rt_swap_put(void);
+#endif
+static inline void wt_swap(void) {
+#ifdef PORT_R36S
+    if (sRtAsync) {
+        rt_swap_put();
+        return;
+    }
+#endif
+    unsigned long long t0 = sceKernelGetProcessTimeWide(); rt_sync(); gVitaDrawWhere = 3; pace_swap(0); vglSwapBuffers(GL_FALSE); pace_swap(1); gVitaDrawWhere = 0; gVitaWall[0] += sceKernelGetProcessTimeWide() - t0; }
 /* What one draw of a batch reads (flush_impl): its state and its data. */
 typedef struct FlushIn {
     State s;
@@ -2422,6 +2466,8 @@ static void flush_run(const FlushIn *in) {
 #define RT_XF 8 /* the intro's cross-fade */
 #define RT_TEXUP 9 /* (R36S / TrimUI) a texture's pixels, made by the render thread: the drawing thread does not wait */
 #define RT_TEXDEL 10 /* (R36S / TrimUI) a texture let go */
+#define RT_SWAP 11 /* (R36S / TrimUI) the picture's end: bound again, swapped, the parts' memory of it let go */
+#define RT_FBEGIN 12 /* (R36S / TrimUI) the picture's beginning: bound, cleared */
 typedef struct RtHdr { uint32_t size, op, pad_[2]; } RtHdr;
 static uint8_t *sRtRing;
 static volatile uint32_t sRtHead, sRtTail; /* bytes handed over / done, counting on (the ring's place: & (RT_RING - 1)) */
@@ -2598,6 +2644,43 @@ static int rt_tex_del(GLuint id) {
     rt_commit();
     return 1;
 }
+/* the picture handed over: its swap (and the parts' memory let go during it) in the ring */
+static void dp_free_take(void **out, int *n);
+static void rt_swap_put(void) {
+    static void *list[4096];
+    int n = 0, k;
+    uint64_t *q;
+    dp_free_take(list, &n);
+    q = (uint64_t *)(void *)rt_reserve(RT_SWAP, 8u + 8u * (uint32_t)n);
+    q[0] = (uint64_t)n;
+    for (k = 0; k < n; k++) {
+        q[1 + k] = (uint64_t)(uintptr_t)list[k];
+    }
+    rt_commit();
+    rt_kick();
+    sRtSwapsSent++;
+    sBackDraw = (sBackDraw + 1) % 3;
+}
+static void rt_fbegin_put(void) {
+    (void)rt_reserve(RT_FBEGIN, 16u);
+    rt_commit();
+}
+/* until the render thread has swapped every picture handed over before (the one being drawn now goes on) */
+static void rt_wait_swaps(void) {
+    if (sRtSwapsDone != sRtSwapsSent) {
+        unsigned long long t0 = sceKernelGetProcessTimeWide();
+        gVitaDrawWhere = 1;
+        R36_CTX_RELEASE();
+        rt_kick();
+        while (sRtSwapsDone != sRtSwapsSent) {
+            __asm__ volatile("yield");
+        }
+        gVitaDrawWhere = 0;
+        gVitaRt[2]++;
+        gVitaRt[3] += sceKernelGetProcessTimeWide() - t0;
+    }
+    __sync_synchronize();
+}
 #endif
 static void rt_exec_dp(uint8_t *p);
 /* The packet at the tail made by whoever holds sRtLock: the render thread, or the drawing thread when the
@@ -2641,6 +2724,20 @@ static int rt_exec_one(void) {
             glBindTexture(GL_TEXTURE_2D, q[0]);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)q[1], (GLsizei)q[2], 0, GL_RGBA, GL_UNSIGNED_BYTE, q + 4);
             sGlc.tex = 0; /* (the binding changed) */
+        } else if (h->op == RT_FBEGIN) {
+            frame_begin_gl();
+        } else if (h->op == RT_SWAP) {
+            const uint64_t *q = (const uint64_t *)(const void *)(h + 1);
+            uint64_t k, nf = q[0];
+            target_set(0); /* (the picture bound again before the swap) */
+            pace_swap(0);
+            vglSwapBuffers(GL_FALSE);
+            pace_swap(1);
+            for (k = 0; k < nf; k++) { /* (the kept parts' memory the draws of this picture read) */
+                free((void *)(uintptr_t)q[1 + k]);
+            }
+            __sync_synchronize();
+            sRtSwapsDone++;
         } else if (h->op == RT_TEXDEL) {
             const uint32_t *q = (const uint32_t *)(const void *)(h + 1);
             GLuint id = q[0];
@@ -2740,10 +2837,15 @@ static void rt_start(void) {
     gVitaRtCore = !(gVglSafe2 & 8) && gVitaCore3 == 1 ? 3 : 0;
 #ifdef PORT_R36S
     gR36CtxWake = rt_ctx_wake;
+    {
+        const char *e = getenv("R36_ASYNC");
+        sRtAsync = e == NULL || atoi(e) != 0;
+        sBackDraw = gxm_back_buffer_index;
+    }
 #endif
     __sync_synchronize();
     sRtOn = 1;
-    Vita_Log("vgl: the draws made on a render thread of their own, on core %d\n", gVitaRtCore);
+    Vita_Log("vgl: the draws made on a render thread of their own, on core %d%s\n", gVitaRtCore, sRtAsync ? "; the pictures swapped there too (the drawing thread a picture ahead)" : "");
 }
 /* The state that is not the program's: stencil, blend, alpha test, depth, colour mask, scissor (sGlc: only what
    changed). sVarUse must be the variant the program was chosen from (or NULL). */
@@ -3248,7 +3350,7 @@ __attribute__((hot)) static int state_of(int ctx, int type, State *d) {
             WtC *e = &sWtC[((uint32_t)(r[1] ^ r[5] ^ r[0] >> 3 ^ r[7] >> 1 ^ r[4]) * 0x9E3779B1u) >> 27];
             if (gVitaWtCOn && e->ok && e->frame == gGsFrame && e->ctx == ctx && e->type == type && e->wp == wpk && memcmp(r, e->r, sizeof(r)) == 0 &&
                 (e->kind == 2 ? e->s->drawn && !e->s->stale && e->s->tex == e->st.tex && (e->epoch == gGsEpoch || wt_sig(e->s) == e->s->sig)
-                              : sOlTex[gxm_back_buffer_index % 3] == e->st.tex) &&
+                              : sOlTex[BACKI % 3] == e->st.tex) &&
                 /* the shadows' work page shares its page with the glow's first target: read as the target only
                    where state_of_ would not take it for the work page (outside a shadow's markers) */
                 ((r[1] & 0x3FFF) != WP_FBP * 32 || !sWpReady || (sWtOn && sWpMarked && sWpAgain < 0 && sWpSlot == WP_OTHER && !FX_WT_OFF))) {
@@ -3269,7 +3371,7 @@ __attribute__((hot)) static int state_of(int ctx, int type, State *d) {
             gVitaWtC[1]++;
             if (ok && sTexXf && d->tme && d->pad_[0] != 0 && gGsMainFbp >= 0) {
                 WorkTarget *ws = wt_find(tb, (uint32_t)((r[1] >> 14) & 0x3F));
-                int kind = ws != NULL && ws->tex == d->tex ? 2 : sOlTex[gxm_back_buffer_index % 3] == d->tex ? 3 : 0;
+                int kind = ws != NULL && ws->tex == d->tex ? 2 : sOlTex[BACKI % 3] == d->tex ? 3 : 0;
                 if (kind != 0) {
                     memcpy(e->r, r, sizeof(r));
                     e->frame = gGsFrame; e->epoch = gGsEpoch; e->ctx = ctx; e->type = type; e->wp = wpk; e->kind = kind; e->s = ws; e->ok = 1;
@@ -3527,7 +3629,7 @@ static int state_of_(int ctx, int type, State *d) {
                 sTexXf = 1;
                 sTexXfV[0] = 0.0f; sTexXfV[1] = tw / (float)wtS->w; sTexXfV[2] = 0.0f; sTexXfV[3] = th / (float)wtS->h;
                 gVitaWt[2]++;
-            } else if (mainPage && page == 2 && tbw == 8 && sOlTex[gxm_back_buffer_index % 3] != 0) {
+            } else if (mainPage && page == 2 && tbw == 8 && sOlTex[BACKI % 3] != 0) {
                 pageTex = 3; /* (the scene drawing the picture has ended with the switch to the target: it is in memory) */
                 sTexXf = 1;
                 sTexXfV[0] = (float)VIEW_X / (float)SCR_W; sTexXfV[1] = tw / 512.0f * (float)VIEW_W / (float)SCR_W;
@@ -3550,7 +3652,7 @@ static int state_of_(int ctx, int type, State *d) {
         }
         sTexDeferOk = sTexMayDefer && abe && !pageTex;
         sTexDeferredNow = 0;
-        d->tex = pageTex == 1 ? sWpTexK[pageSlot] : pageTex == 2 ? wtS->tex : pageTex == 3 ? sOlTex[gxm_back_buffer_index % 3] : texture_get(ctx);
+        d->tex = pageTex == 1 ? sWpTexK[pageSlot] : pageTex == 2 ? wtS->tex : pageTex == 3 ? sOlTex[BACKI % 3] : texture_get(ctx);
         if (pageTex) { /* a picture drawn here: its alpha as stored (0x80 = 1), not the uploads' (the shader scales those) */
             d->pad_[0] = ((t0 >> 34) & 1) ? 1 : 2;
         }
@@ -5679,6 +5781,7 @@ static void swap_sized(void) {
     }
     wt_swap();
     if (change) {
+        rt_sync(); /* (the swap made: what follows is this thread's) */
         scr_resized(w, h);
     }
 }
@@ -6351,8 +6454,15 @@ void GsGpu_FrameEnd(void) {
     al_frame_end(!gVitaGsSkip);
     flush();
     flush_bins_c(1);
+#ifdef PORT_R36S
+    if (sRtAsync) { /* (the picture before swapped by now: at most one picture handed over and not shown) */
+        rt_wait_swaps();
+    } else
+#endif
+    {
     rt_sync(); /* the render thread's draws done: what follows is this thread's (the parts kept are let go, the swap) */
     target_set(0); /* (the picture bound again before the swap) */
+    }
     if (sWpClrN > 0) { /* a clear of the page held back and never needed: the page was not cleared */
         sWpValid = 0;
         sWpClrN = 0;
@@ -6392,6 +6502,9 @@ void GsGpu_FrameEnd(void) {
         gVitaFxMask = kMask[k];
     }
     am_write(0.0f, 0.0f, 512.0f, 448.0f, -1); /* (the next picture's alpha: not known) */
+#ifdef PORT_R36S
+    if (!sRtAsync) /* (else let go by the render thread after this picture's draws: its swap) */
+#endif
     dp_free_pending();
     if (!gVitaGsSkip) {
         extern int Vita_InFight(void);
@@ -8074,6 +8187,11 @@ void GsGpu_DpFree(void *blob) {
         sDpFreeN--;
     }
     sDpFreeList[sDpFreeN++] = blob;
+}
+static void dp_free_take(void **out, int *n) { /* (the list handed over, emptied) */
+    memcpy(out, sDpFreeList, (size_t)sDpFreeN * sizeof(void *));
+    *n = sDpFreeN;
+    sDpFreeN = 0;
 }
 static void dp_free_pending(void) {
     int i;
