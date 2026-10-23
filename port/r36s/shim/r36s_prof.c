@@ -74,7 +74,10 @@ static inline int ret_addr(uintptr_t a) {
     i = *(const uint32_t *)(a - 4);
     return (i & 0x0F000000u) == 0x0B000000u || (i & 0xFE000000u) == 0xFA000000u || (i & 0x0FFFFFF0u) == 0x012FFF30u;
 }
-static void note(void *ctx) {
+#ifndef __arm__ /* (the tests built for the PC: nothing noted) */
+static void note(void *ctx, uint32_t w) { (void)ctx; (void)w; }
+#else
+static void note(void *ctx, uint32_t w) {
     ucontext_t *uc = (ucontext_t *)ctx;
     Slot *s;
     uintptr_t pc = uc->uc_mcontext.arm_pc, lr = uc->uc_mcontext.arm_lr, fp = uc->uc_mcontext.arm_fp, sp = uc->uc_mcontext.arm_sp;
@@ -115,7 +118,7 @@ static void note(void *ctx) {
             }
         }
     }
-    s->total++;
+    s->total += w;
     h = ((uint32_t)pc * 2654435761u) ^ (c1 * 40503u) ^ (c2 * 7u);
     for (k = 0; k < 32; k++) {
         Ent *e = &s->e[(h + k) & (ENTRIES - 1)];
@@ -124,20 +127,24 @@ static void note(void *ctx) {
             e->c1 = c1;
             e->c2 = c2;
             __sync_synchronize();
-            e->n = 1;
+            e->n = w;
             return;
         }
         if (e->pc == (uint32_t)pc && e->c1 == c1 && e->c2 == c2) {
-            e->n++;
+            e->n += w;
             return;
         }
     }
-    s->lost++;
+    s->lost += w;
 }
+#endif
 static void on_sig(int sig, siginfo_t *si, void *ctx) {
     int e = errno;
-    (void)sig; (void)si;
-    note(ctx);
+    /* (the kernel looks at a thread's processor time at its clock ticks, every 4 or 10 ms: one signal then for the
+       milliseconds since the last, the others counted as overruns) */
+    int w = 1 + (si != NULL && si->si_overrun > 0 ? si->si_overrun : 0);
+    (void)sig;
+    note(ctx, (uint32_t)(w > 100 ? 100 : w));
     errno = e;
 }
 
@@ -291,6 +298,7 @@ static void report(FILE *f, double t0, double t1) {
     double secs = t1 - t0;
     fprintf(f, "=== %.0f..%.0f s ===\n", t0, t1);
     clocks(f);
+    { extern void R36_GlTimes(FILE *f, double secs); R36_GlTimes(f, secs); }
     for (i = 0; i < sSlots; i++) {
         Slot *s = &sSlot[i];
         uint32_t tot = s->total - s->totalPrev, ns = 0, ni = 0, lost = s->lost - s->lostPrev;

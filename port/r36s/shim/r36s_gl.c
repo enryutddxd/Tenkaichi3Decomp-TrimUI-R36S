@@ -164,9 +164,73 @@ static void gl_make_primary(void) {
     tPrimary = 1;
     sPrimarySet = 1;
 }
-#define ENTER() int gl_f_ = gl_enter(); if (gl_f_ < 0) { return; }
-#define ENTER_R(v) int gl_f_ = gl_enter(); if (gl_f_ < 0) { return v; }
-#define LEAVE() gl_leave(gl_f_)
+/* the time each GL call takes on the clock (in the driver, waiting included), by function: prof.txt (r36s_prof.c) */
+typedef struct GlT { const char *name; unsigned long long ns, max; unsigned n, slow; } GlT;
+#define GLT_MAX 192
+static GlT sGlT[GLT_MAX], sGlTPrev[GLT_MAX];
+static int sGlTn;
+static pthread_mutex_t sGlTLock = PTHREAD_MUTEX_INITIALIZER;
+static inline unsigned long long glt_now(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (unsigned long long)t.tv_sec * 1000000000ull + (unsigned long long)t.tv_nsec;
+}
+static void glt_add(int *slot, const char *name, unsigned long long t0) {
+    unsigned long long d = glt_now() - t0;
+    GlT *g;
+    if (*slot < 0) {
+        pthread_mutex_lock(&sGlTLock);
+        if (*slot < 0 && sGlTn < GLT_MAX) {
+            sGlT[sGlTn].name = name;
+            *slot = sGlTn++;
+        }
+        pthread_mutex_unlock(&sGlTLock);
+        if (*slot < 0) {
+            return;
+        }
+    }
+    g = &sGlT[*slot];
+    g->ns += d;
+    g->n++;
+    if (d > g->max) {
+        g->max = d;
+    }
+    if (d > 2000000ull) {
+        g->slow++;
+    }
+}
+static int glt_cmp(const void *a, const void *b) {
+    unsigned long long x = ((const GlT *)a)->ns, y = ((const GlT *)b)->ns;
+    return x < y ? 1 : x > y ? -1 : 0;
+}
+/* what changed since the last call, the largest first */
+void R36_GlTimes(FILE *f, double secs) {
+    GlT d[GLT_MAX];
+    int i, n = sGlTn, k = 0;
+    for (i = 0; i < n; i++) {
+        GlT c = sGlT[i];
+        d[k].name = c.name;
+        d[k].ns = c.ns - sGlTPrev[i].ns;
+        d[k].n = c.n - sGlTPrev[i].n;
+        d[k].slow = c.slow - sGlTPrev[i].slow;
+        d[k].max = c.max;
+        sGlT[i].max = 0;
+        sGlTPrev[i] = c;
+        if (d[k].n != 0) {
+            k++;
+        }
+    }
+    qsort(d, k, sizeof(GlT), glt_cmp);
+    fprintf(f, "GL calls on the clock (waiting included), ms per second: ");
+    for (i = 0; i < k && i < 14; i++) {
+        fprintf(f, "%s%s %.1f (%u calls/s, longest %.1f ms, %u over 2 ms)", i ? "; " : "", strncmp(d[i].name, "r36_", 4) == 0 ? d[i].name + 4 : d[i].name, d[i].ns / 1e6 / secs, (unsigned)(d[i].n / secs),
+                d[i].max / 1e6, d[i].slow);
+    }
+    fprintf(f, "\n");
+}
+#define ENTER() static int glt_slot_ = -1; unsigned long long glt_t0_ = glt_now(); int gl_f_ = gl_enter(); if (gl_f_ < 0) { return; }
+#define ENTER_R(v) static int glt_slot_ = -1; unsigned long long glt_t0_ = glt_now(); int gl_f_ = gl_enter(); if (gl_f_ < 0) { return v; }
+#define LEAVE() (gl_leave(gl_f_), glt_add(&glt_slot_, __func__, glt_t0_))
 
 /* ---- state the shim keeps track of ---- */
 #define NDISP 3

@@ -303,11 +303,17 @@ def sdl_stub():
     return so
 
 
+LIBGCC = next(iter(sorted(pathlib.Path("/usr/lib/gcc-cross/arm-linux-gnueabihf").glob("*/libgcc.a"))), "")  # (apt: gcc-arm-linux-gnueabihf)
+
+
 def link_cmd(objs, extra):
     wraps = [f"-Wl,--wrap={n}" for n in PORT_WRAPS + FAST_WRAPS + VUFAST_WRAPS]
     so = GEN / "libSDL2-2.0.so.0"
-    return CC + ["-no-pie", "-w", "-o", str(OUT / "bt3")] + extra + objs + [str(so), "-lpthread", "-lm", "-ldl", "-lrt"] + wraps + \
-           ["-Wl,--allow-shlib-undefined", "-Wl,-rpath,$ORIGIN/libs"]
+    # -rtlib=none: zig's own runtime brought its memcpy, memset, memcmp (bcmp a byte at a time) and strlen, which then
+    # took the place of the C library's (a fifth of the list reader's time was its bcmp); the few helpers still needed
+    # (64-bit division and conversions) come from GCC's libgcc.a, linked in (nothing more to carry to the device)
+    return CC + ["-no-pie", "-w", "-rtlib=none", "-o", str(OUT / "bt3")] + extra + objs + [str(so), "-lpthread", "-lm", "-ldl", "-lrt"] + wraps + \
+           ["-Wl,--allow-shlib-undefined", "-Wl,-rpath,$ORIGIN/libs", LIBGCC]
 
 
 def link():
