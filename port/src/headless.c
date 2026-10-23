@@ -123,7 +123,7 @@ int sceClose(int fd) { (void)fd; return 0; }
  */
 /* A pointer variable of the game: 4 bytes wide in the 64-bit build too (port/tools/ptr32.py does this for the game's
    own files; a declaration written in a port file has to say it itself). */
-#if defined(__x86_64__) && defined(__clang__)
+#if (defined(__x86_64__) || defined(__aarch64__)) && defined(__clang__)
 #undef __ptr32 /* the Windows headers of mingw define these two away */
 #undef __uptr
 #define GAME_PTR *__ptr32 __uptr
@@ -233,7 +233,11 @@ void Port_Trace(unsigned vblanks) {
        triangle of the stage collision mesh, and say what the game's own sweep answers for the same segment. */
     if (getenv("BT3_CAMCHECK") != NULL && vblanks == (unsigned)atoi(getenv("BT3_CAMCHECK"))) {
         extern void *BtlChar_FindByObjId(int objId);
+#ifdef PORT_TSP
+        extern struct { int nodeCount, unk4, unk8, nodeOfs, polyOfs, vtxOfs; } * __ptr32 __uptr gStgColMesh;
+#else
         extern struct { int nodeCount, unk4, unk8, nodeOfs, polyOfs, vtxOfs; } *gStgColMesh;
+#endif
         extern void *ColMesh_GetPoly(void *mesh, int idx);
         extern void ColMesh_GetPolyVerts(void *mesh, void *poly, float *v0, float *v1, float *v2);
         extern int BtlCam_TraceStage(float *out, float *from, float *to, float *frac, int *hitObj);

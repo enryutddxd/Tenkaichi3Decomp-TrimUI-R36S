@@ -121,7 +121,7 @@ void Vita_TouchSetSpot(int b, int spot) {
 /* FlashClip (include/sys/gfxm_c.h): name[0x40] at 0, its timeline (FlashTl) at 0xCC: frames (+0x08), frame (+0x0C),
    state (+0x15) */
 #define CLIP_TL 0xCC
-#define TL_FRAMES(c) (*(const uint8_t **)((const uint8_t *)(c) + CLIP_TL + 0x08))
+#define TL_FRAMES(c) ((const uint8_t *)(uintptr_t)*(const uint32_t *)((const uint8_t *)(c) + CLIP_TL + 0x08)) /* (a 4-byte pointer) */
 #define TL_FRAME(c) (*(const uint32_t *)((const uint8_t *)(c) + CLIP_TL + 0x0C))
 #define TL_STATE(c) (*((const uint8_t *)(c) + CLIP_TL + 0x15))
 

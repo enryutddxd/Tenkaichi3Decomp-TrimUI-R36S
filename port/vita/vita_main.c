@@ -97,7 +97,12 @@ extern int __real_main(int argc, char **argv);
 
 /* The fight's state, read the way port/src/headless.c reads it (integer interfaces only: this file is compiled
    for the Vita's float ABI, the game's is software float). */
-extern struct { int state; } *gBtlSeq;
+#ifdef PORT_TSP /* (64 bits: the game's own pointers are 4 bytes wide) */
+#define GPTR * __ptr32 __uptr
+#else
+#define GPTR *
+#endif
+extern struct { int state; } GPTR gBtlSeq;
 /* The list may be drawn while the game goes on: not while a film plays (its pictures come from the game's thread). */
 int Vita_InFight(void) { return gBtlSeq != NULL && gBtlSeq->state == 3; }
 /* the battle from its stage intro to its end (states 0..6): the same stage and fighters the whole time, drawn the fast
