@@ -76,6 +76,18 @@ R36_REAL_LIST
 #define R_UNK 0xFFFFFFFFu
 /* the changes of state the driver sees, for the log: programs, framebuffers, textures, buffers, uniform bytes, capabilities */
 unsigned long long gR36Chg[6];
+/* (for the log) what happened since the last draw, and the draws that took long by it: 1 framebuffer, 2 program,
+   4 texture bound, 8 texture written, 16 blend/depth/stencil/mask/capability, 32 uniforms, 64 texture parameters,
+   128 the picture's first draw, 256 a clear */
+static unsigned sEv = 128;
+#define EV_N 512
+static unsigned sSlowN[EV_N], sAllN[EV_N];
+static unsigned long long sSlowNs[EV_N], sAllNs[EV_N];
+static unsigned ev_name(const char *n) {
+    if (strstr(n, "Uniform")) { return 32; }
+    if (strstr(n, "Blend") || strstr(n, "Depth") || strstr(n, "Stencil") || strstr(n, "Mask")) { return 16; }
+    return 0;
+}
 typedef struct RAttr { GLuint buf; GLint size; GLenum type; GLboolean norm; GLsizei stride; const void *ptr; signed char valid, on; } RAttr;
 static GLuint rBuf[2] = {R_UNK, R_UNK}, rProg = R_UNK, rFbo = R_UNK;
 static RAttr rAt[8];
@@ -130,6 +142,7 @@ static inline void r_use(GLuint p) {
         p_glUseProgram(p);
         rProg = p;
         gR36Chg[0]++;
+        sEv |= 2;
     }
 }
 static inline void r_fbo(GLuint f) {
@@ -137,6 +150,7 @@ static inline void r_fbo(GLuint f) {
         p_glBindFramebuffer(GL_FRAMEBUFFER, f);
         rFbo = f;
         gR36Chg[1]++;
+        sEv |= 1;
     }
 }
 
@@ -268,11 +282,7 @@ static inline unsigned long long glt_start(void) {
     }
     if (sGltOn < 0) {
         const char *e = getenv("R36_GLTIME");
-#ifdef PORT_TSP /* (the TrimUI's test builds: on unless R36_GLTIME=0) */
-        sGltOn = e == NULL || atoi(e) != 0;
-#else
         sGltOn = e != NULL && atoi(e) != 0;
-#endif
         if (!sGltOn) {
             return 0;
         }
@@ -358,6 +368,53 @@ void R36_GlTimes(FILE *f, double secs) {
         }
         fprintf(f, "state changes a second: programs %.0f, framebuffers %.0f, textures bound %.0f, buffers bound %.0f, uniform KB %.0f, blend/depth/other %.0f\n",
                 c[0] / secs, c[1] / secs, c[2] / secs, c[3] / secs, c[4] / 1024.0 / secs, c[5] / secs);
+    }
+    {   /* the draws that took over 1 ms, by what changed just before them */
+        static const char kL[9] = {'F', 'P', 'T', 'W', 'S', 'U', 'Q', '1', 'C'};
+        static unsigned pN[EV_N], pA[EV_N];
+        static unsigned long long pNs[EV_N], pANs[EV_N];
+        unsigned dn[EV_N], an[EV_N], idx[EV_N], tot = 0, totA = 0, m;
+        unsigned long long dns[EV_N], ans[EV_N], totNs = 0;
+        int j, nI = 0;
+        for (j = 0; j < EV_N; j++) {
+            dn[j] = sSlowN[j] - pN[j]; pN[j] = sSlowN[j];
+            dns[j] = sSlowNs[j] - pNs[j]; pNs[j] = sSlowNs[j];
+            an[j] = sAllN[j] - pA[j]; pA[j] = sAllN[j];
+            ans[j] = sAllNs[j] - pANs[j]; pANs[j] = sAllNs[j];
+            tot += dn[j];
+            totNs += dns[j];
+            totA += an[j];
+            if (dn[j] != 0) {
+                idx[nI++] = (unsigned)j;
+            }
+        }
+        for (j = 1; j < nI; j++) { /* (by time, the most first) */
+            unsigned x = idx[j];
+            int k2 = j - 1;
+            while (k2 >= 0 && dns[idx[k2]] < dns[x]) {
+                idx[k2 + 1] = idx[k2];
+                k2--;
+            }
+            idx[k2 + 1] = x;
+        }
+        fprintf(f, "draws over 1 ms: %.0f a second of %.0f, %.0f ms a second; by what changed before them (F framebuffer, P program, T texture bound, W texture written, S blend/depth/stencil, U uniforms, Q texture parameters, 1 picture's first, C clear):",
+                tot / secs, totA / secs, totNs / 1e6 / secs);
+        for (j = 0; j < nI && j < 12; j++) {
+            char lab[12];
+            int q = 0, b;
+            m = idx[j];
+            for (b = 0; b < 9; b++) {
+                if (m & (1u << b)) {
+                    lab[q++] = kL[b];
+                }
+            }
+            if (q == 0) {
+                lab[q++] = '-';
+            }
+            lab[q] = 0;
+            fprintf(f, " %s %.0f/s %.0f ms (of %.0f/s, %.0f ms);", lab, dn[m] / secs, dns[m] / 1e6 / secs, an[m] / secs, ans[m] / 1e6 / secs);
+        }
+        fprintf(f, "\n");
     }
     if (sGltOn != 1) {
         return;
@@ -702,6 +759,7 @@ void r36_glBindTexture(GLenum target, GLuint t) {
     sBound[sUnit & 3] = t;
     p_glBindTexture(target, real_tex(t));
     gR36Chg[2]++;
+    sEv |= 4;
     LEAVE();
 }
 void r36_glActiveTexture(GLenum u) {
@@ -718,15 +776,18 @@ void r36_glTexImage2D(GLenum target, GLint level, GLint ifmt, GLsizei w, GLsizei
         return;
     }
     p_glTexImage2D(target, level, ifmt, w, h, border, fmt, type, px);
+    sEv |= 8;
     LEAVE();
 }
 void r36_glTexSubImage2D(GLenum target, GLint level, GLint x, GLint y, GLsizei w, GLsizei h, GLenum fmt, GLenum type, const void *px) {
     ENTER();
     p_glTexSubImage2D(target, level, x, y, w, h, fmt, type, px);
+    sEv |= 8;
     LEAVE();
 }
 void r36_glTexParameteri(GLenum target, GLenum pname, GLint param) {
     ENTER();
+    sEv |= 64;
     GLuint v = sBound[sUnit & 3];
     if (v != 0 && (int)v < sTexCap && sTex[v].alias == 4 && (pname == GL_TEXTURE_MIN_FILTER || pname == GL_TEXTURE_MAG_FILTER)) {
         param = GL_NEAREST; /* (a depth texture is not filtered in OpenGL ES 3) */
@@ -869,6 +930,7 @@ void r36_glScissor(GLint x, GLint y, GLsizei w, GLsizei h) {
 }
 void r36_glClear(GLbitfield mask) {
     ENTER();
+    sEv |= 256;
     p_glClear(mask);
     LEAVE();
 }
@@ -900,6 +962,7 @@ static void cap(GLenum c, int on) {
         p_glDisable(c);
     }
     gR36Chg[5]++;
+    sEv |= 16;
 }
 void r36_glEnable(GLenum c) { ENTER(); cap(c, 1); LEAVE(); }
 void r36_glDisable(GLenum c) { ENTER(); cap(c, 0); LEAVE(); }
@@ -1298,6 +1361,18 @@ static void attr_restore(void) { /* the renderer's attributes 0..3 back as it se
 /* ---- draws ---- */
 unsigned gR36Draws;
 __attribute__((weak)) unsigned gR36Dpb[3]; /* (vita_vgl.c's; the tests have none) */
+static unsigned long long draw_t0(void) { return glt_now(); }
+static void draw_done(unsigned long long t0) {
+    unsigned long long d = glt_now() - t0;
+    unsigned e = sEv & (EV_N - 1);
+    sAllN[e]++;
+    sAllNs[e] += d;
+    if (d > 1000000ull) {
+        sSlowN[e]++;
+        sSlowNs[e] += d;
+    }
+    sEv = 0;
+}
 static void pre_draw(void) {
     gR36Draws++;
     flush_dirty();
@@ -1350,10 +1425,10 @@ void r36_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
     pre_draw();
     if (sCurProg == 0) {
         ff_begin();
-        p_glDrawArrays(mode, first, count);
+        { unsigned long long dt0_ = draw_t0(); p_glDrawArrays(mode, first, count); draw_done(dt0_); }
         ff_end();
     } else {
-        p_glDrawArrays(mode, first, count);
+        { unsigned long long dt0_ = draw_t0(); p_glDrawArrays(mode, first, count); draw_done(dt0_); }
     }
     LEAVE();
 }
@@ -1363,11 +1438,11 @@ void r36_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *idx
     if (sCurProg == 0) {
         ff_begin();
         r_bind(GL_ELEMENT_ARRAY_BUFFER, sElemBuf);
-        p_glDrawElements(mode, count, type, idx);
+        { unsigned long long dt0_ = draw_t0(); p_glDrawElements(mode, count, type, idx); draw_done(dt0_); }
         ff_end();
     } else {
         r_bind(GL_ELEMENT_ARRAY_BUFFER, sElemBuf);
-        p_glDrawElements(mode, count, type, idx);
+        { unsigned long long dt0_ = draw_t0(); p_glDrawElements(mode, count, type, idx); draw_done(dt0_); }
     }
     LEAVE();
 }
@@ -1399,7 +1474,7 @@ void vglFastDraw(GLenum type, uint32_t offset, uint32_t count, const void *vunif
         gR36Chg[4] += size;
     }
     r_bind(GL_ELEMENT_ARRAY_BUFFER, sElemBuf);
-    p_glDrawElements(GL_TRIANGLES, (GLsizei)count, type, (const void *)(uintptr_t)offset);
+    { unsigned long long dt0_ = draw_t0(); p_glDrawElements(GL_TRIANGLES, (GLsizei)count, type, (const void *)(uintptr_t)offset); draw_done(dt0_); }
     LEAVE();
 }
 void vglFastDrawPtr(GLenum type, const void *idx, uint32_t count, const void *vunif, uint32_t size) {
@@ -1414,10 +1489,10 @@ void vglFastDrawPtr(GLenum type, const void *idx, uint32_t count, const void *vu
         long at = R36_Stream(idx, (size_t)count * (type == GL_UNSIGNED_INT ? 4u : type == GL_UNSIGNED_BYTE ? 1u : 2u));
         if (at >= 0) {
             r_bind(GL_ELEMENT_ARRAY_BUFFER, sStreamBuf);
-            p_glDrawElements(GL_TRIANGLES, (GLsizei)count, type, (const void *)(uintptr_t)at);
+            { unsigned long long dt0_ = draw_t0(); p_glDrawElements(GL_TRIANGLES, (GLsizei)count, type, (const void *)(uintptr_t)at); draw_done(dt0_); }
         } else {
             r_bind(GL_ELEMENT_ARRAY_BUFFER, 0);
-            p_glDrawElements(GL_TRIANGLES, (GLsizei)count, type, idx);
+            { unsigned long long dt0_ = draw_t0(); p_glDrawElements(GL_TRIANGLES, (GLsizei)count, type, idx); draw_done(dt0_); }
         }
     }
     LEAVE();
@@ -1556,6 +1631,7 @@ void vglSwapBuffers(GLboolean has_commondialog) {
     (void)has_commondialog;
     flush_dirty();
     stream_next();
+    sEv |= 128;
     if (sDisplayCb != NULL) {
         sDisplayCb(gxm_color_surfaces_addr[done]); /* (the renderer's pacing: it may wait for its blank here) */
     }
@@ -1640,7 +1716,7 @@ void R36_TextPresent(const uint32_t *px, int w, int h) {
 
 /* the passthroughs */
 #define R36_GL_PASS(r, n, p, a) r r36_##n p { ENTER_R((r)0); r v_ = p_##n a; LEAVE(); return v_; }
-#define R36_GL_PASS_V(n, p, a) void r36_##n p { ENTER(); p_##n a; LEAVE(); }
+#define R36_GL_PASS_V(n, p, a) void r36_##n p { static unsigned e_ = ~0u; ENTER(); if (e_ == ~0u) { e_ = ev_name(#n); } sEv |= e_; p_##n a; LEAVE(); }
 R36_GL_PASS_V(glAttachShader, (GLuint program, GLuint shader), (program, shader))
 R36_GL_PASS_V(glBindAttribLocation, (GLuint program, GLuint index, const GLchar *name), (program, index, name))
 R36_GL_PASS_V(glBlendEquation, (GLenum mode), (mode))

@@ -1301,7 +1301,7 @@ static int sWtOn;           /* (made at the start: bt3.txt safe2=128 leaves them
 int gVitaFxOff;             /* (the log's pictures without the effects: with the work page off) */
 extern int gVitaSliver;
 int gVitaFxSweep;           /* the effects left out in turn, 60 pictures each, the chip's time logged by which */
-int gVitaFxAb = 1;          /* (TrimUI test build) see frame_begin */
+int gVitaFxAb = 0;          /* (TrimUI test build) see frame_begin */
 int gVitaFxMask;            /* 1 the table passes, 2 the glow, 4 the work targets' effects, 8 the outline */
 #define FX_WT_OFF (gVitaFxOff || (gVitaFxMask & 4))
 int gVitaClipOff;           /* the fighters' reject of program 0 not done (the log's pictures; bt3.txt safe2=512) */
