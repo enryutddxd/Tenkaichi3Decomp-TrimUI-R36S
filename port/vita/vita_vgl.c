@@ -60,7 +60,11 @@ extern void Vita_Log(const char *fmt, ...);
 #define GS_H 448.0f
 /* The picture on the 960 x 544 screen: all of it (the game projects its 3D for that shape, src/battle/btl_cam.c
    with Port_WideFactor; menus and films are stretched to it), or the console's 4:3 in the middle (wide=0). */
+#ifdef PORT_R36S
+int gVitaWide = 0; /* (the R36S's screen is 4:3, the console's own shape) */
+#else
 int gVitaWide = 1;
+#endif
 int gVitaPbufMb;  /* bt3.txt pbuf=<MB>: the parameter buffer, 0 vitaGL's default (16 MB) */
 /* the size drawn at: 640 x 368, which the Vita's display stretches to its 960 x 544 (a GPU test: the graphics chip
    was still working 40 ms after the last draw of a picture, with the fighters' shader made cheap or not: the
@@ -69,16 +73,25 @@ int gVitaPbufMb;  /* bt3.txt pbuf=<MB>: the parameter buffer, 0 vitaGL's default
    little, and drawn at the screen's size the text and the art are sharp. The display memory is made for 960 x 544
    once and described again for the size of the moment (vitaGL change, vglSwapResolution); the change is made at a
    picture's end (GsGpu_FrameEnd, scr_switch). bt3.txt menuhi=0: 640 x 368 everywhere, as before. */
+#ifdef PORT_R36S /* the R36S: its own screen's 640 x 480 for both (bt3.txt res=WxH for the fights, menures=WxH) */
+int gR36FightW = 640, gR36FightH = 480, gR36MenuW = 640, gR36MenuH = 480;
+#define SCR_W_FIGHT gR36FightW
+#define SCR_H_FIGHT gR36FightH
+#define SCR_W_MENU gR36MenuW
+#define SCR_H_MENU gR36MenuH
+static int sScrW = 640, sScrH = 480;
+#else
 #define SCR_W_FIGHT 640
 #define SCR_H_FIGHT 368
 #define SCR_W_MENU 960
 #define SCR_H_MENU 544
 static int sScrW = SCR_W_FIGHT, sScrH = SCR_H_FIGHT;
+#endif
 int gVitaMenuHi = 1;
 int gVitaSprInset = 1; /* bt3.txt sprinset=0: sprites' coordinates as given (see GsGpu_Draw_impl) */
 #define SCR_W sScrW
 #define SCR_H sScrH
-static int sViewW = SCR_W_FIGHT;
+static int sViewW = 640;
 #define VIEW_W sViewW
 #define VIEW_H SCR_H
 #define VIEW_X ((SCR_W - VIEW_W) / 2)
@@ -197,6 +210,11 @@ static struct { const float *src; uint32_t count, sig, at, seen, slot, ioff; } s
 #define FT_IDX (3 * FT_VERTS)   /* the fighters' strips as triangles, indices kept on the chip beside their vertices */
 static GLuint sFtIbo;
 static uint8_t *sStageVboPtr, *sFtVboPtr, *sDpIboPtr; /* the chip's buffers, written straight (no vitaGL call: the render thread may be in it) */
+#ifdef PORT_R36S /* (the R36S: what is written there is copied to the GPU before the next draw, port/r36s/shim/r36s_gl.c) */
+#define R36_DIRTY(p, n) vglR36Dirty((p), (size_t)(n))
+#else
+#define R36_DIRTY(p, n) ((void)0)
+#endif
 static uint16_t *sFtIboPtr;
 static uint32_t sFtIdxUsed;
 static uint32_t sFtSlotNext; /* places given in the order strips are first written: neighbours differ */
@@ -1413,6 +1431,13 @@ static int vj_thread(SceSize args, void *argp);
 static int sVjOn;
 int gVitaMsaa; /* bt3.txt msaa=<0, 2, 4> */
 int GsGpu_Init(void) {
+#ifdef PORT_R36S
+    /* the R36S: textures with a palette converted to colours (OpenGL ES has no palette textures), the draws on the
+       drawing thread itself (the GL context belongs to one thread), no multisampling */
+    gVglSafe |= 268435456;
+    gVglSafe2 |= 2;
+    gVitaMsaa = 0;
+#endif
     memset(&sTextFb, 0, sizeof(sTextFb));
     sTextFb.size = sizeof(sTextFb);
     if (sceDisplayGetFrameBuf(&sTextFb, SCE_DISPLAY_SETBUF_NEXTFRAME) < 0) {
@@ -1468,7 +1493,11 @@ int GsGpu_Init(void) {
     glLoadIdentity();
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
+#ifdef PORT_R36S /* (4:3 of the height, in the middle) */
+    sViewW = gVitaWide || SCR_H * 4 / 3 >= SCR_W ? SCR_W : SCR_H * 4 / 3;
+#else
     sViewW = gVitaWide ? SCR_W : SCR_W * 725 / 960;
+#endif
     glViewport(VIEW_X, 0, VIEW_W, VIEW_H);
     glDisable(GL_CULL_FACE);
     if (!(gVglSafe & 16)) {
@@ -5347,7 +5376,11 @@ static void scr_resized(int w, int h) {
     int i;
     sScrW = w;
     sScrH = h;
+#ifdef PORT_R36S /* (4:3 of the height, in the middle) */
+    sViewW = gVitaWide || SCR_H * 4 / 3 >= SCR_W ? SCR_W : SCR_H * 4 / 3;
+#else
     sViewW = gVitaWide ? SCR_W : SCR_W * 725 / 960;
+#endif
     for (i = 0; i < 3; i++) {
         if (sOlTex[i] != 0 && gxm_color_surfaces_addr[i] != NULL) {
             tex_redescribe(sOlTex[i], gxm_color_surfaces_addr[i], SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR, w, h);
@@ -6855,6 +6888,7 @@ __attribute__((hot)) static int stage_draw(const State *d, const float *v, uint3
             memcpy(map + (size_t)(sStageUsed + i) * 32, o, 24);
             memcpy(map + (size_t)(sStageUsed + i) * 32 + 24, c, 4);
         }
+        R36_DIRTY(map + (size_t)sStageUsed * 32, (size_t)count * 32);
         sStageCache[h].src = v;
         sStageCache[h].count = count;
         sStageCache[h].sig = sig;
@@ -6968,6 +7002,7 @@ __attribute__((hot)) static int fighter_draw(const State *d, int layer, const fl
         for (i = 0; i < count; i++) {
             memcpy(map + (size_t)(sFtUsed + i) * 40, &v[i * 12], 40);
         }
+        R36_DIRTY(map + (size_t)sFtUsed * 40, (size_t)count * 40);
         glUnmapBuffer(GL_ARRAY_BUFFER);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         sFtCache[h].src = v;
@@ -7284,9 +7319,11 @@ static void ft_upload(const ChipPlan *p) {
     map = sFtVboPtr;
     if (map != NULL) {
         memcpy(map + (size_t)p->at * 40, src, p->count * 40);
+        R36_DIRTY(map + (size_t)p->at * 40, p->count * 40);
     }
     if (sFtIboPtr != NULL) {
         memcpy(sFtIboPtr + p->ioff, src + p->count * 40, (p->count - 2) * 3 * 2);
+        R36_DIRTY(sFtIboPtr + p->ioff, (p->count - 2) * 3 * 2);
     }
     gVitaFt[1]++;
     gVitaFt[2] = p->at + p->count;
@@ -7414,6 +7451,7 @@ static void chip_emit(const State *d, int layer, const float (*u)[4], const Chip
             map = sStageVboPtr;
             if (map != NULL) {
                 memcpy(map + (size_t)p->at * 32, extra, p->count * 32);
+                R36_DIRTY(map + (size_t)p->at * 32, p->count * 32);
             }
             extra += p->count * 32;
             gVitaStage[1]++;
@@ -7736,6 +7774,7 @@ void *GsGpu_DpCapEnd(void) {
             }
         }
         memcpy(map + sDpIboUsed, src, g->icount * 2);
+        R36_DIRTY(map + sDpIboUsed, g->icount * 2);
         if (sDpIboShadow != NULL) {
             memcpy(sDpIboShadow + sDpIboUsed, src, g->icount * 2);
         }
@@ -8852,6 +8891,7 @@ __attribute__((hot)) static void vu_draw_impl(int kind, int layer, int ctx, cons
             if (map != NULL) {
                 uint32_t sz = p->mode == 1 ? 40u : 32u;
                 memcpy(map + (size_t)p->at * sz, (const uint8_t *)p + 32, p->count * sz);
+                R36_DIRTY(map + (size_t)p->at * sz, p->count * sz);
             }
         }
         gVglPlan = NULL;

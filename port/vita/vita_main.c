@@ -33,7 +33,11 @@
 #include <malloc.h>
 #include "debugScreen.h"
 
+#ifdef PORT_R36S /* the R36S: the folder the program is started in (port/r36s/package: ports/bt3) */
+#define HOME "."
+#else
 #define HOME "ux0:data/bt3"
+#endif
 #ifdef PORT_VITA_SFX /* the development build has its own log, so that its runs and the release's can be kept side by side */
 #define SFX PORT_VITA_SFX
 #else
@@ -954,6 +958,13 @@ void Vita_VBlank(unsigned vblanks) {
 
 /* exit(), from anywhere in the port or the game: keep the screen until it has been read. */
 void __wrap_exit(int code) {
+#ifdef PORT_R36S
+    if (code == 9 && !sEnded) { /* stopped by the player (START + SELECT): back to the system at once */
+        sEnded = 1;
+        logf_("vita: exit(%d) at vertical blank %u (stopped by the player)\n", code, gPortVBlanks);
+        quit();
+    }
+#endif
     if (!sEnded) {
         sEnded = 1;
         fflush(stdout);
@@ -1008,7 +1019,7 @@ static void read_settings(void) {
         while (end > eq && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ')) {
             *--end = '\0';
         }
-#ifdef PORT_VITA_RELEASE
+#if defined(PORT_VITA_RELEASE) && !defined(PORT_R36S) /* (the R36S: every setting, for the tests made with players) */
         /* the released program: only the player's settings. The test runs leave theirs in the same file
            (mode=demo, film=...): a game started from its bubble goes to its title screen, not into a test fight */
         if (strcmp(line, "disc") != 0 && strcmp(line, "heap") != 0 && strcmp(line, "wide") != 0 && strcmp(line, "report") != 0) {
@@ -1175,6 +1186,18 @@ static void read_settings(void) {
         } else if (strcmp(line, "startmode") == 0) { /* the menus start on this screen (62 the options) */
             extern int gVitaStartMode;
             gVitaStartMode = atoi(eq);
+#ifdef PORT_R36S
+        } else if (strcmp(line, "res") == 0 || strcmp(line, "menures") == 0) { /* the size drawn at: res=640x480 */
+            extern int gR36FightW, gR36FightH, gR36MenuW, gR36MenuH;
+            int w = 0, h = 0;
+            if (sscanf(eq, "%dx%d", &w, &h) == 2 && w >= 160 && h >= 120 && w <= 1920 && h <= 1080) {
+                if (line[0] == 'r') { gR36FightW = w; gR36FightH = h; } else { gR36MenuW = w; gR36MenuH = h; }
+            }
+        } else if (strcmp(line, "vsync") == 0) {
+            setenv("R36_VSYNC", eq, 1);
+        } else if (strcmp(line, "pin") == 0) {
+            setenv("R36_PIN", eq, 1);
+#endif
         } else if (strcmp(line, "replay") == 0) {
             setenv("BT3_REPLAY", eq, 1);
         } else if (strncmp(line, "BT3_", 4) == 0) {

@@ -81,6 +81,20 @@ int Port_PadRead(int socket, unsigned char *data) {
             btn |= map[i].ps2;
         }
     }
+#ifdef PORT_R36S
+    { /* the R36S has L2 / R2 (and on some, L3 / R3: the sticks pressed); SELECT + L1 / R1 give L3 / R3 */
+        extern unsigned R36_PadExtra(void);
+        unsigned x = R36_PadExtra();
+        int sel = (pad.buttons & SCE_CTRL_SELECT) != 0, l = (pad.buttons & SCE_CTRL_LTRIGGER) != 0, r = (pad.buttons & SCE_CTRL_RTRIGGER) != 0;
+        if (x & 1) { btn |= B_L2; }
+        if (x & 2) { btn |= B_R2; }
+        if ((x & 4) || (sel && l)) { btn |= 0x0002; } /* L3 */
+        if ((x & 8) || (sel && r)) { btn |= 0x0004; } /* R3 */
+        if (sel && !l && !r) { btn |= B_SELECT; }
+        if (!sel && l) { btn |= B_L1; }
+        if (!sel && r) { btn |= B_R1; }
+    }
+#else
     if (pad.buttons & SCE_CTRL_SELECT) { /* SELECT + L / R = L2 / R2; SELECT alone = SELECT */
         if (pad.buttons & SCE_CTRL_LTRIGGER) { btn |= B_L2; }
         if (pad.buttons & SCE_CTRL_RTRIGGER) { btn |= B_R2; }
@@ -89,6 +103,7 @@ int Port_PadRead(int socket, unsigned char *data) {
         if (pad.buttons & SCE_CTRL_LTRIGGER) { btn |= B_L1; }
         if (pad.buttons & SCE_CTRL_RTRIGGER) { btn |= B_R1; }
     }
+#endif
     { /* the touch panels: L2 / R2 on the rear pad or the front corners, the menus on the screen (vita_touch.c) */
         extern unsigned Vita_TouchPad(void);
         btn |= Vita_TouchPad();

@@ -15,6 +15,15 @@
 
 `libshacccg.suprx`, the system's shader compiler, is not included: each user extracts it from their own Vita.
 
+## In the R36S program (`port/r36s`)
+
+| Component | Use | License |
+|---|---|---|
+| [SDL2](https://www.libsdl.org/) headers (`port/r36s/third_party/SDL2`); the library itself is the system's | Window, OpenGL ES context, controller, sound | zlib |
+| Khronos OpenGL ES 3 headers (`port/r36s/third_party/khronos`) | The OpenGL ES API | MIT / Apache-2.0 (Khronos) |
+| The PSP SDK's 8 x 8 debug font (`port/r36s/third_party/r36s_font.h`, from vitasdk/samples' `debugScreenFont.c`) | The text screen | BSD (PSPSDK) |
+| [zig](https://ziglang.org/) (build time) | The C compiler and glibc 2.28 stubs for armhf | MIT |
+
 ## Used at build time only
 
 | Component | Use | License |
