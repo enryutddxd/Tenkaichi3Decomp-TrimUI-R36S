@@ -1435,9 +1435,11 @@ int GsGpu_Init(void) {
     /* the R36S: textures with a palette converted to colours (OpenGL ES has no palette textures), the draws on the
        drawing thread itself (the GL context belongs to one thread), no multisampling */
     gVglSafe |= 268435456;
-    {   /* the render thread as on the Vita (the GL context goes back and forth: port/r36s/shim/r36s_gl.c); R36_RT=0: the draws on the drawing thread */
+    {   /* the render thread as on the Vita (the GL context goes back and forth: port/r36s/shim/r36s_gl.c) only with
+           bt3.txt rt=1: tried (test 12), the drawing thread waited for it at each picture's end and the fights ran no
+           faster and less evenly (the render thread is the one short of time there: the driver's work per draw) */
         const char *e = getenv("R36_RT");
-        if (e != NULL && atoi(e) == 0) {
+        if (e == NULL || atoi(e) == 0) {
             gVglSafe2 |= 2;
         }
     }

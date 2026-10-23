@@ -1216,6 +1216,8 @@ static void read_settings(void) {
             setenv("R36_VSYNC", eq, 1);
         } else if (strcmp(line, "pin") == 0) {
             setenv("R36_PIN", eq, 1);
+        } else if (strcmp(line, "rt") == 0) { /* 1: the draws on a render thread of their own (as on the Vita) */
+            setenv("R36_RT", eq, 1);
 #endif
         } else if (strcmp(line, "replay") == 0) {
             setenv("BT3_REPLAY", eq, 1);

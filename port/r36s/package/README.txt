@@ -33,6 +33,7 @@ Ajustes opcionales en ports/bt3/bt3.txt (una línea por ajuste):
   res=480x360     dibujar las peleas a menor resolución (más rápido)
   vsync=0         sin esperar el refresco de pantalla
   pin=1           fijar los hilos del juego a núcleos concretos (como en la Vita)
+  rt=1            los dibujos en un hilo propio, como en la Vita (experimental: en las pruebas, no más rápido)
 
 ENGLISH
 -------
