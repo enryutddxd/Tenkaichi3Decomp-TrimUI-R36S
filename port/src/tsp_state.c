@@ -15,6 +15,8 @@ extern int32_t GPTR gBootCard;
 extern int32_t GPTR gMcFlow;
 
 void R36_GameState(FILE *f) {
+    extern volatile unsigned gR36ProfWindow;
+    fprintf(f, "  effects in these 10 s: %s\n", (gR36ProfWindow & 1) ? "LEFT OUT (A/B)" : "on");
     fprintf(f, "  game: fade flags %d alpha %d step %d", (int)gColorFade[0], (int)gColorFade[2], (int)gColorFade[3]);
     if (gBootCard != NULL) {
         fprintf(f, " | boot card flags %d timer %d mc %d", (int)gBootCard[2], (int)gBootCard[3], (int)gBootCard[4]);

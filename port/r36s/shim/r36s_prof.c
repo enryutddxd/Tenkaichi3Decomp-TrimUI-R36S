@@ -487,6 +487,7 @@ static double now_s(void) {
     return t.tv_sec + t.tv_nsec / 1e9;
 }
 static double sStart;
+volatile unsigned gR36ProfWindow; /* (the report's number: vita_vgl.c's effects A/B goes by it) */
 static void *dump_thread(void *arg) {
     FILE *f = fopen("prof.txt", "w");
     double t0 = now_s() - sStart;
@@ -506,6 +507,7 @@ static void *dump_thread(void *arg) {
         report(f, t0, t1);
         snapshots(f);
         { extern void R36_GameState(FILE *f); R36_GameState(f); }
+        gR36ProfWindow++;
         fflush(f);
         t0 = t1;
     }

@@ -1301,6 +1301,7 @@ static int sWtOn;           /* (made at the start: bt3.txt safe2=128 leaves them
 int gVitaFxOff;             /* (the log's pictures without the effects: with the work page off) */
 extern int gVitaSliver;
 int gVitaFxSweep;           /* the effects left out in turn, 60 pictures each, the chip's time logged by which */
+int gVitaFxAb = 1;          /* (TrimUI test build) see frame_begin */
 int gVitaFxMask;            /* 1 the table passes, 2 the glow, 4 the work targets' effects, 8 the outline */
 #define FX_WT_OFF (gVitaFxOff || (gVitaFxMask & 4))
 int gVitaClipOff;           /* the fighters' reject of program 0 not done (the log's pictures; bt3.txt safe2=512) */
@@ -6285,6 +6286,16 @@ void GsGpu_FrameEnd(void) {
     sMainZ = 1;
     sSeeThru = 0;
     sTblZero = 0;
+#ifdef PORT_TSP
+    {   /* (TrimUI test build: the effects all left out every other 10 s, on prof.txt's clock, for its A/B of the
+           driver's time; bt3.txt fxab=0: as usual) */
+        extern int gVitaFxAb;
+        if (gVitaFxAb && !gVitaGsSkip) {
+            extern volatile unsigned gR36ProfWindow; /* (r36s_prof.c: its report's number) */
+            gVitaFxMask = (gR36ProfWindow & 1) ? 15 : 0;
+        }
+    }
+#endif
     if (gVitaFxSweep == 1 && !gVitaGsSkip) { /* the effects left out in turn, 60 pictures each */
         static const int kMask[6] = {0, 1, 2, 4, 8, 15};
         static unsigned n, k;

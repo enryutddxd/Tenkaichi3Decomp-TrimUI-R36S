@@ -1182,6 +1182,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "safe2") == 0) { /* vita_vgl.c's gVglSafe2: 1 a picture handed to the chip whole, 2 no render thread, 8 the render thread on the fourth core */
             extern int gVglSafe2;
             gVglSafe2 = (int)strtol(eq, NULL, 0);
+        } else if (strcmp(line, "fxab") == 0) { /* (TrimUI test build) the effects off every other 10 s */
+            extern int gVitaFxAb;
+            gVitaFxAb = atoi(eq);
         } else if (strcmp(line, "fxsweep") == 0) { /* the effects left out in turn: their cost in the log */
             extern int gVitaFxSweep;
             gVitaFxSweep = atoi(eq);
