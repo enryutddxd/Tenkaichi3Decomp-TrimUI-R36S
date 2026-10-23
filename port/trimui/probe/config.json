@@ -1,0 +1,6 @@
+{
+	"label": "BT3 Probe",
+	"icon": "",
+	"launch": "launch.sh",
+	"description": "Revisa el sistema para el port de BT3"
+}
