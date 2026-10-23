@@ -55,17 +55,14 @@ export LD_LIBRARY_PATH="$GAMEDIR/libs:/usr/trimui/lib:/usr/lib:$LD_LIBRARY_PATH"
 export MALLOC_ARENA_MAX=1
 unset SDL_BLITTER_DISABLED
 
-# the processor at its full speed while the game runs (put back afterwards): the governor, and the lowest and
-# highest speed it may pick both at the top one (the system's menu leaves the highest at 1.2 GHz; the chip goes to 2.0)
+# the processor at a fixed speed while the game runs (put back afterwards): the governor, and the lowest and
+# highest speed it may pick both at 1608 MHz (the system's menu leaves the highest at 1.2 GHz; the chip goes to 2.0).
+# BT3_CPU_KHZ=<kHz> for another (one of scaling_available_frequencies)
 CF=/sys/devices/system/cpu/cpu0/cpufreq
 OLDGOV=$(cat $CF/scaling_governor 2>/dev/null)
 OLDMIN=$(cat $CF/scaling_min_freq 2>/dev/null)
 OLDMAX=$(cat $CF/scaling_max_freq 2>/dev/null)
-TOP=$(cat $CF/cpuinfo_max_freq 2>/dev/null)
-for f in $(cat $CF/scaling_available_frequencies 2>/dev/null); do
-  [ "$f" -gt "${TOP:-0}" ] 2>/dev/null && TOP=$f
-done
-[ -n "$BT3_CPU_KHZ" ] && TOP=$BT3_CPU_KHZ
+TOP=${BT3_CPU_KHZ:-1608000}
 for c in /sys/devices/system/cpu/cpu*/cpufreq; do
   echo performance > "$c/scaling_governor" 2>/dev/null || $ESUDO sh -c "echo performance > $c/scaling_governor" 2>/dev/null
   if [ -n "$TOP" ]; then

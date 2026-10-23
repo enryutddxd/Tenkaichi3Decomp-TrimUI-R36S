@@ -76,8 +76,8 @@ int gVitaPbufMb;  /* bt3.txt pbuf=<MB>: the parameter buffer, 0 vitaGL's default
    once and described again for the size of the moment (vitaGL change, vglSwapResolution); the change is made at a
    picture's end (GsGpu_FrameEnd, scr_switch). bt3.txt menuhi=0: 640 x 368 everywhere, as before. */
 #ifdef PORT_R36S /* the R36S: its own screen's 640 x 480 for both (bt3.txt res=WxH for the fights, menures=WxH) */
-#ifdef PORT_TSP /* (the TrimUI Smart Pro: 1280 x 720; the fights at 960 x 540, scaled up) */
-int gR36FightW = 960, gR36FightH = 540, gR36MenuW = 1280, gR36MenuH = 720;
+#ifdef PORT_TSP /* (the TrimUI Smart Pro: 1280 x 720; everything drawn at the Vita's 960 x 544, scaled up) */
+int gR36FightW = 960, gR36FightH = 544, gR36MenuW = 960, gR36MenuH = 544;
 #else
 int gR36FightW = 640, gR36FightH = 480, gR36MenuW = 640, gR36MenuH = 480;
 #endif

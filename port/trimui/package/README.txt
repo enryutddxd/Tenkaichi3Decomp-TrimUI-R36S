@@ -27,9 +27,8 @@ Si algo falla, mándame estos archivos de Data/ports/bt3/:
   log.txt, err.txt, launcher.txt y crash.txt (si existe)
 
 Ajustes opcionales en Data/ports/bt3/bt3.txt (una línea por ajuste):
-  res=1280x720    peleas a la resolución de la pantalla (por defecto 960x540)
-  res=640x360     peleas a menor resolución (más rápido)
-  menures=960x540 menús a menor resolución
+  res=1280x720     peleas a la resolución de la pantalla (por defecto 960x544, como la Vita)
+  menures=1280x720 menús a la resolución de la pantalla (por defecto 960x544)
   wide=0          imagen 4:3 en el centro
   vsync=0         sin esperar el refresco de pantalla
 
