@@ -340,6 +340,16 @@ def package():
     shutil.copy(OUT / "bt3", OUT / "bt3.unstripped")  # (for reading crash.txt)
     shutil.copy(OUT / "bt3", game / "bt3")
     subprocess.run([BU + "strip", "-g", str(game / "bt3")], check=True)
+    # the functions' names for prof.txt (shim/r36s_prof.c): address and name, in address order
+    nm = subprocess.run([BU + "nm", "-n", "-S", "--defined-only", str(OUT / "bt3")], check=True, capture_output=True, text=True).stdout
+    sym = []
+    for l in nm.splitlines():
+        w = l.split(" ", 3)
+        if len(w) == 3:
+            w = [w[0], "0", w[1], w[2]]
+        if len(w) == 4 and w[2] in "tTwW":
+            sym.append(f"{w[0]} {int(w[1], 16):x} {w[3]}\n")
+    (game / "bt3.sym").write_text("".join(sym))
     os.chmod(game / "bt3", 0o755)
     shutil.copy(R / "package/Tenkaichi3.sh", pkg / "ports/Dragon Ball Z Budokai Tenkaichi 3.sh")
     os.chmod(pkg / "ports/Dragon Ball Z Budokai Tenkaichi 3.sh", 0o755)

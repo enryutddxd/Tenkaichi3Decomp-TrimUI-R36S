@@ -775,6 +775,7 @@ static void *tramp(void *p) {
     Tramp t = *(Tramp *)p;
     free(p);
     alt_stack();
+    { extern void R36_ProfThread(void); R36_ProfThread(); } /* (r36s_prof.c) */
     return t.fn(t.arg);
 }
 extern int __real_pthread_create(pthread_t *th, const pthread_attr_t *attr, void *(*fn)(void *), void *arg);
@@ -912,6 +913,7 @@ static void term(int sig) {
 /* (again after the system's libraries are loaded and started: one of them may have put a handler of its own in
    front, which then hid where a crash was) */
 void R36_CrashHandlers(void) {
+    extern void R36_ProfStart(void);
     struct sigaction sa, old;
     int sigs[5] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT}, i;
     memset(&sa, 0, sizeof(sa));
@@ -928,6 +930,7 @@ void R36_CrashHandlers(void) {
                         di.dli_sname ? di.dli_sname : "?");
         }
     }
+    R36_ProfStart();
 }
 __attribute__((constructor)) static void crash_init(void) {
     struct sigaction sa;
@@ -943,4 +946,5 @@ __attribute__((constructor)) static void crash_init(void) {
     signal(SIGTERM, term);
     signal(SIGINT, term);
     signal(SIGHUP, term);
+    { extern void R36_ProfThread(void); R36_ProfThread(); } /* (the main thread) */
 }

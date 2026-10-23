@@ -41,7 +41,9 @@ declare -A OLDGOV
 for g in $GOVS; do
   OLDGOV[$g]=$(cat "$g" 2>/dev/null)
   $ESUDO sh -c "echo performance > $g" 2>/dev/null
+  echo "governor $g: ${OLDGOV[$g]} -> $(cat "$g" 2>/dev/null)"
 done
+cat /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq /sys/devices/system/cpu/cpufreq/policy*/scaling_cur_freq /sys/class/devfreq/*/cur_freq 2>/dev/null | tr '\n' ' '; echo "(processor max, now; devfreq now)"
 
 chmod +x "$GAMEDIR/bt3"
 $GPTOKEYB "bt3" &
