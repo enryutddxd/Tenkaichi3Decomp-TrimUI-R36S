@@ -240,7 +240,7 @@ def port_sources():
     S = ROOT / "port/src"
     out = [(ROOT / "src/port/vu0_a.c", "vu0"), (ROOT / "src/port/vu0_b.c", "vu0")]
     for n in ("gs_marker", "headless", "mathf_pc", "plat_gs", "plat_mc", "plat_movie", "plat_mpeg2",
-              "plat_settings", "plat_stub", "plat_sys", "softfloat_ps2", "port_fast", "port_vufast"):
+              "plat_settings", "plat_stub", "plat_sys", "softfloat_ps2", "port_fast", "port_vufast", "tsp_state"):
         out.append((S / (n + ".c"), "gs" if n in ("plat_movie", "plat_mpeg2") else "ee"))
     out += [(V / "vita_mem.c", "hard"), (V / "vita_file.c", "hard"), (V / "vita_main.c", "hard"), (V / "vita_float.c", "hard"),
             (GEN / "vita_dat.c", "hard"), (S / "gs/gs_sony.c", "hard"),

@@ -505,6 +505,7 @@ static void *dump_thread(void *arg) {
         t1 = now_s() - sStart;
         report(f, t0, t1);
         snapshots(f);
+        { extern void R36_GameState(FILE *f); R36_GameState(f); }
         fflush(f);
         t0 = t1;
     }
