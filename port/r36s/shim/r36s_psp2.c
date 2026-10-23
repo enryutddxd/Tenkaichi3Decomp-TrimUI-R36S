@@ -72,6 +72,21 @@ static uint64_t mono_ns(void) {
     return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
 }
 static pthread_mutex_t sClkLock = PTHREAD_MUTEX_INITIALIZER;
+/* Without the counter: a thread of its own reads the clock every half millisecond and the time is that reading
+   (the renderer asks it thousands of times a picture for its figures and pacing; a system call each was 5-9% of the
+   drawing thread). Half a millisecond is finer than anything the game paces by (a blank: 16.7 ms). R36_COARSE=0:
+   clock_gettime at every call. */
+static uint64_t sTickUs;
+static void *tick_thread(void *a) {
+    (void)a;
+    for (;;) {
+        struct timespec d = {0, 500000L};
+        uint64_t us = (mono_ns() - ((uint64_t)sT0.tv_sec * 1000000000ull + (uint64_t)sT0.tv_nsec)) / 1000ull;
+        __atomic_store_n(&sTickUs, us, __ATOMIC_RELEASE);
+        nanosleep(&d, NULL);
+    }
+    return NULL;
+}
 static void clk_init(void) {
     pthread_mutex_lock(&sClkLock);
     if (sClk == 0) {
@@ -115,8 +130,19 @@ static void clk_init(void) {
             R36_LogLine(seen < 0.0 ? "r36: the clock from clock_gettime (the processor's counter is not readable here: SIGILL)\n"
                                    : "r36: the clock from clock_gettime (the processor's counter runs at %.0f Hz)\n", seen);
         }
+        if (!ok) {
+            const char *c = getenv("R36_COARSE");
+            pthread_t t;
+            sTickUs = (mono_ns() - ((uint64_t)sT0.tv_sec * 1000000000ull + (uint64_t)sT0.tv_nsec)) / 1000ull;
+            if ((c == NULL || atoi(c) != 0) && pthread_create(&t, NULL, tick_thread, NULL) == 0) {
+                pthread_detach(t);
+                pthread_setname_np(t, "r36_clock");
+                ok = 2;
+                R36_LogLine("r36: the clock read by a thread of its own every 0.5 ms\n");
+            }
+        }
         __sync_synchronize();
-        sClk = ok ? 1 : 2;
+        sClk = ok == 1 ? 1 : ok == 2 ? 3 : 2;
     }
     pthread_mutex_unlock(&sClkLock);
 }
@@ -125,7 +151,10 @@ static inline uint64_t mul32(uint64_t d, uint64_t mul) {
     return (d >> 32) * mul + (((d & 0xFFFFFFFFull) * (mul & 0xFFFFFFFFull)) >> 32) + (d & 0xFFFFFFFFull) * (mul >> 32);
 }
 unsigned long long sceKernelGetProcessTimeWide(void) {
-    if (__builtin_expect(sClk == 1, 1)) {
+    if (__builtin_expect(sClk == 3, 1)) {
+        return __atomic_load_n(&sTickUs, __ATOMIC_ACQUIRE);
+    }
+    if (sClk == 1) {
         return mul32(cnt_read() - sCnt0, sCntMul);
     }
     if (sClk == 0) {
@@ -136,7 +165,10 @@ unsigned long long sceKernelGetProcessTimeWide(void) {
 }
 /* nanoseconds on the same clock (r36s_gl.c's call times) */
 unsigned long long R36_NowNs(void) {
-    if (__builtin_expect(sClk == 1, 1)) {
+    if (__builtin_expect(sClk == 3, 1)) {
+        return __atomic_load_n(&sTickUs, __ATOMIC_ACQUIRE) * 1000ull;
+    }
+    if (sClk == 1) {
         return mul32(cnt_read() - sCnt0, sNsMul);
     }
     if (sClk == 0) {

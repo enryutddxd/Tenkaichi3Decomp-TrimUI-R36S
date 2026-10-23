@@ -207,17 +207,35 @@ def port_sources():
     return out
 
 
+# The renderer and the PS2 graphics front end (kinds "gs" and "hard": the drawing thread's work) built with GCC, as
+# the Vita's build does (-O3, its block reordering), for the R36S's Cortex-A35 with NEON: clang's code for them ran the
+# drawing thread at ~50 ms a picture where the Vita's took ~19. Linked by zig as before (its glibc 2.28 stubs: the
+# objects' C library calls get their versions there); GCC's C library headers are newer, so nothing that would pick
+# newer entry points (fortify, C2x names) is on. BT3_GCC=0: clang for these too.
+GCC = os.environ.get("BT3_R36S_GCC", BU + "gcc")
+USE_GCC = os.environ.get("BT3_GCC", "1") != "0" and shutil.which(GCC) is not None
+GCC_FLAGS = ["-U_TIME_BITS", "-U_FILE_OFFSET_BITS", "-mcpu=cortex-a35", "-mfpu=neon-fp-armv8", "-mfloat-abi=hard", "-marm", "-fno-pie", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0",
+             "-fno-stack-protector", "-fno-stack-clash-protection", "-freorder-blocks-and-partition"]
+GCC_DROP = ("-Wno-error=incompatible-function-pointer-types", "-Wno-error=int-conversion", "-Wno-error=implicit-function-declaration",
+            "-Wno-error=incompatible-pointer-types", "-Wno-error=return-type", "-Wno-error=int-to-pointer-cast", "-Wno-error")
+
+
 def cc_port(item):
     f, kind = item
     o = OBJ / (("gs_" if kind == "gs" else "sh_" if kind == "shim" else "pc_") + f.stem + ".o")
     base = CC + ["-std=gnu99", "-c"] + COMMON + ["-Iinclude", "-Iport/include", "-Iport/src", "-Iport/vita"]
+    if USE_GCC and kind in ("gs", "hard"):
+        base = [GCC] + GCC_FLAGS + ["-std=gnu99", "-c"] + [a for a in COMMON if a not in GCC_DROP] + \
+               ["-w", "-Iinclude", "-Iport/include", "-Iport/src", "-Iport/vita"]
+        if f.name in ("vita_float.c",):  # (the float self-test: the float unit's own arithmetic, in the game's mode; NEON ignores the mode)
+            base += ["-mfpu=vfpv4", "-fno-tree-vectorize", "-fno-tree-slp-vectorize"]
     if fresh(o, f):
         return o, f, ""
     if kind == "gs":
         r = run(base + ["-O3", "-include", "r36s_force.h", "-include", "vita_cold.h", "-Dgetenv=Vita_GsGetenv"] + SHIM_INC +
                 [f"-I{ROOT / 'port/src/gs'}", f"-I{V / 'sdlshim'}", str(f), "-o", str(o)])
     elif kind == "hard":
-        if f.name in NEON_FILES:
+        if f.name in NEON_FILES and not USE_GCC:
             base = base + ["-mcpu=cortex_a35"]
         r = run(base + ["-O3", "-include", "r36s_force.h", "-include", "vita_cold.h"] + SHIM_INC + [f"-I{GEN}", str(f), "-o", str(o)])
     elif kind == "shim":
