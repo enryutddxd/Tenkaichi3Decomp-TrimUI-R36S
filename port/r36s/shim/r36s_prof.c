@@ -43,11 +43,32 @@ static __thread int tSlot = -1;
 static __thread uintptr_t tLo, tHi;
 static int sOff = -1;
 
-static inline int in_text(uintptr_t a) { return a >= (uintptr_t)__executable_start && a < (uintptr_t)etext; }
+/* this program's code as mapped (r-xp in /proc/self/maps: __executable_start is the start of the read-only part
+   before it, with a gap that is not mapped) */
+static uintptr_t sTextLo = 1, sTextHi = 0;
+static inline int in_text(uintptr_t a) { return a >= sTextLo && a < sTextHi; }
+static void text_range(void) {
+    FILE *f = fopen("/proc/self/maps", "r");
+    char line[512];
+    uintptr_t me = (uintptr_t)&text_range;
+    if (f == NULL) {
+        return;
+    }
+    while (fgets(line, sizeof(line), f) != NULL) {
+        unsigned long lo, hi;
+        char perm[8];
+        if (sscanf(line, "%lx-%lx %7s", &lo, &hi, perm) == 3 && me >= lo && me < hi && perm[2] == 'x') {
+            sTextHi = (uintptr_t)hi;
+            sTextLo = (uintptr_t)lo;
+            break;
+        }
+    }
+    fclose(f);
+}
 /* a return address into this program: the instruction before it is a call */
 static inline int ret_addr(uintptr_t a) {
     uint32_t i;
-    if ((a & 3) != 0 || !in_text(a) || a < (uintptr_t)__executable_start + 4) {
+    if ((a & 3) != 0 || !in_text(a) || a < sTextLo + 4) {
         return 0;
     }
     i = *(const uint32_t *)(a - 4);
@@ -381,6 +402,7 @@ void R36_ProfThread(void) {
         memset(&sa, 0, sizeof(sa));
         sa.sa_sigaction = on_sig;
         sa.sa_flags = SA_SIGINFO | SA_RESTART;
+        text_range();
         sigaction(SIGPROF, &sa, NULL);
         sStart = now_s();
         handler = 1;
