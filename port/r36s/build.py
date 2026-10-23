@@ -441,6 +441,9 @@ def package():
     shutil.copy(P / "Tenkaichi3.sh", sh)
     os.chmod(sh, 0o755)
     shutil.copy(P / "README.txt", game / "README.txt")
+    if TSP:  # (also as a TrimUI App: started without PortMaster)
+        shutil.copytree(P / "app", pkg / "Apps/BT3")
+        os.chmod(pkg / "Apps/BT3/launch.sh", 0o755)
     (game / "disc/PUT_YOUR_DISC_FILES_HERE.txt").write_text(
         "Copy SLUS_216.78 and the BIN and DATA folders of your own USA disc (SLUS-21678) here.\n"
         "Copia aqui SLUS_216.78 y las carpetas BIN y DATA de tu propio disco USA (SLUS-21678).\n")
@@ -448,7 +451,7 @@ def package():
     zipname = OUT / ("Tenkaichi3Decomp-TrimUI.zip" if TSP else "Tenkaichi3Decomp-R36S.zip")
     if zipname.exists():
         zipname.unlink()
-    subprocess.run(["zip", "-qr", str(zipname)] + (["Roms", "Data"] if TSP else ["ports"]), cwd=pkg, check=True)
+    subprocess.run(["zip", "-qr", str(zipname)] + (["Roms", "Data", "Apps"] if TSP else ["ports"]), cwd=pkg, check=True)
     print(f"{zipname}: {zipname.stat().st_size} bytes")
 
 

@@ -2,10 +2,12 @@
 # Dragon Ball Z: Budokai Tenkaichi 3 (Tenkaichi3Decomp) for the TrimUI Smart Pro, stock system, through PortMaster.
 # This script goes to Roms/PORTS/; the game to Data/ports/bt3/, with the files of your own USA disc (SLUS-21678)
 # in Data/ports/bt3/disc/ (see Data/ports/bt3/README.txt).
-# (bash when the system has it, for PortMaster's control.txt; else the system's sh)
-if [ -z "$BASH_VERSION" ] && command -v bash >/dev/null 2>&1; then
-  exec bash "$0" "$@"
-fi
+# every step of this script into bt3_trace.txt at the card's root (to see where it stops)
+TRACE=/mnt/SDCARD/bt3_trace.txt
+[ -d /mnt/SDCARD ] || TRACE="$(dirname "$0")/bt3_trace.txt"
+echo "=== start: $0 (shell: ${BASH_VERSION:-sh}, user $(id -u 2>/dev/null))" >> "$TRACE"
+exec 2>>"$TRACE"
+set -x
 
 XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
 if [ -d "/opt/system/Tools/PortMaster/" ]; then
@@ -22,7 +24,8 @@ fi
 
 GPTOKEYB=":"
 ESUDO=""
-if [ -f "$controlfolder/control.txt" ]; then
+# BT3_NO_PM=1 (the App launcher): without PortMaster's scripts
+if [ -z "$BT3_NO_PM" ] && [ -f "$controlfolder/control.txt" ]; then
   . "$controlfolder/control.txt"
   [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && . "${controlfolder}/mod_${CFW_NAME}.txt"
   type get_controls >/dev/null 2>&1 && get_controls
@@ -42,7 +45,9 @@ if [ -z "$GAMEDIR" ]; then
   exit 1
 fi
 cd "$GAMEDIR" || exit 1
+GAMEDIR="$(pwd)"
 # (the program writes its own log.txt here; what the script and the system print goes to launcher.txt)
+set +x
 exec > "$GAMEDIR/launcher.txt" 2>&1
 echo "game folder: $GAMEDIR; PortMaster: $controlfolder (${CFW_NAME:-?})"
 
