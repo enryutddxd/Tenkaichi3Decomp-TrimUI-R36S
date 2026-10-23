@@ -26,6 +26,7 @@ void Vita_Log(const char *fmt, ...) {
     va_end(ap);
 }
 extern void R36_GlYield(void);
+void Vita_CrashLog(int fd) { (void)fd; }
 
 static int sFail;
 #define CHECK(cond, ...) do { if (!(cond)) { printf("FAIL: " __VA_ARGS__); printf("\n"); sFail++; } else { printf("ok: " __VA_ARGS__); printf("\n"); } } while (0)

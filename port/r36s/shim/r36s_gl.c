@@ -64,7 +64,7 @@ extern void R36_LogLine(const char *fmt, ...);
     X(void, glUniform4f, (GLint, GLfloat, GLfloat, GLfloat, GLfloat)) X(void, glUniform4fv, (GLint, GLsizei, const GLfloat *)) \
     X(void, glUseProgram, (GLuint)) X(void, glVertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *)) \
     X(void, glVertexAttrib4f, (GLuint, GLfloat, GLfloat, GLfloat, GLfloat)) X(void, glViewport, (GLint, GLint, GLsizei, GLsizei)) \
-    X(void, glBindVertexArray, (GLuint))
+    X(void, glBindVertexArray, (GLuint)) X(void *, glMapBufferRange, (GLenum, GLintptr, GLsizeiptr, GLbitfield)) X(GLboolean, glUnmapBuffer, (GLenum))
 #define X(r, n, p) static r(*p_##n) p;
 R36_REAL_LIST
 #undef X
@@ -890,12 +890,18 @@ void vglR36Dirty(const void *at, size_t size) {
         }
     }
 }
+unsigned gR36Up[2];       /* (for the log) bytes and ranges given to the GPU from mapped buffers */
+static int sNoUnsync = -1;
 static void flush_dirty(void) {
     int i, k;
     if (!sDirty) {
         return;
     }
     sDirty = 0;
+    if (sNoUnsync < 0) {
+        const char *e = getenv("R36_NOUNSYNC");
+        sNoUnsync = e != NULL && atoi(e) != 0;
+    }
     for (i = 0; i < sNBufs; i++) {
         Buf *b = &sBufs[i];
         if (b->nr == 0) {
@@ -903,7 +909,20 @@ static void flush_dirty(void) {
         }
         p_glBindBuffer(GL_COPY_WRITE_BUFFER, b->id);
         for (k = 0; k < b->nr; k++) {
-            p_glBufferSubData(GL_COPY_WRITE_BUFFER, (GLintptr)b->r[k].lo, (GLsizeiptr)(b->r[k].hi - b->r[k].lo), b->shadow + b->r[k].lo);
+            /* Written without waiting for the GPU and without the driver copying the buffer for it (glBufferSubData
+               on a buffer a queued draw still reads: the Mali driver copied all 16 MB of the stage's): the renderer
+               only writes places nothing drawn yet has used (vitaGL's memory was written the same way). */
+            GLsizeiptr len = (GLsizeiptr)(b->r[k].hi - b->r[k].lo);
+            void *dst = sNoUnsync ? NULL : p_glMapBufferRange(GL_COPY_WRITE_BUFFER, (GLintptr)b->r[k].lo, len,
+                                                             GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+            if (dst != NULL) {
+                memcpy(dst, b->shadow + b->r[k].lo, (size_t)len);
+                p_glUnmapBuffer(GL_COPY_WRITE_BUFFER);
+            } else {
+                p_glBufferSubData(GL_COPY_WRITE_BUFFER, (GLintptr)b->r[k].lo, len, b->shadow + b->r[k].lo);
+            }
+            gR36Up[0] += (unsigned)len;
+            gR36Up[1]++;
         }
         b->nr = 0;
     }
@@ -950,7 +969,9 @@ static void attr_restore(void) { /* the renderer's attributes 0..3 back as it se
 }
 
 /* ---- draws ---- */
+unsigned gR36Draws;
 static void pre_draw(void) {
+    gR36Draws++;
     flush_dirty();
     if (sCurProg != 0 && (int)sCurProg < sProgCap) {
         Prog *p = &sProg[sCurProg];
@@ -1204,7 +1225,27 @@ void vglSwapBuffers(GLboolean has_commondialog) {
         }
         lastVc = vc;
     }
-    present_tex(sDispTex[done], sDispW, sDispH, 1);
+    {
+        unsigned long long t0 = sceKernelGetProcessTimeWide(), t1;
+        static unsigned long long sumPresent, sumBetween, last;
+        static unsigned n, up0, up1;
+        present_tex(sDispTex[done], sDispW, sDispH, 1);
+        t1 = sceKernelGetProcessTimeWide();
+        sumPresent += t1 - t0;
+        if (last != 0) {
+            sumBetween += t0 - last;
+        }
+        last = t1;
+        if (++n == 120) {
+            R36_LogLine("r36 gl: per picture (120): %u us putting it on the screen (the GPU finishing it), %u us drawing it; %u KB in %u pieces to the GPU from mapped buffers, %u draws\n",
+                        (unsigned)(sumPresent / n), (unsigned)(sumBetween / n), (gR36Up[0] - up0) / n / 1024, (gR36Up[1] - up1) / n, (gR36Draws) / n);
+            n = 0;
+            sumPresent = sumBetween = 0;
+            up0 = gR36Up[0];
+            up1 = gR36Up[1];
+            gR36Draws = 0;
+        }
+    }
     gR36Frames++;
     {
         extern int gR36TextOn;
