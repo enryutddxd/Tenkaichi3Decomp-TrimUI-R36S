@@ -47,7 +47,16 @@ uint32_t Host_DivNearest(uint32_t a, uint32_t b); /* fastcmp.c: the PC stand-in 
 
 /* The float unit's control register for the calling thread: fast = round toward zero, flush to zero, default NaN. */
 void Vita_FloatMode(int fast) {
-#ifdef __arm__
+#if defined(__aarch64__) /* (the TrimUI: AArch64's FPCR has the same bits: RMode 23:22, FZ 24, DN 25) */
+    uint64_t fpcr;
+
+    __asm__ volatile("mrs %0, fpcr" : "=r"(fpcr));
+    fpcr &= ~(uint64_t)((3u << 22) | (1u << 24) | (1u << 25));
+    if (fast) {
+        fpcr |= (3u << 22) | (1u << 24) | (1u << 25);
+    }
+    __asm__ volatile("msr fpcr, %0" : : "r"(fpcr));
+#elif defined(__arm__)
     uint32_t fpscr;
 
     __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr));
@@ -97,7 +106,17 @@ static inline uint32_t fast_fpu_div(uint32_t a, uint32_t b) {
     if (EXP(a) == 0) {
         return (a ^ b) & SIGN;
     }
-#ifdef __arm__
+#if defined(__aarch64__)
+    {
+        uint64_t fpcr;
+        float x = f(a), y = f(b), z;
+        __asm__ volatile("mrs %0, fpcr" : "=r"(fpcr));
+        __asm__ volatile("msr fpcr, %0" : : "r"(fpcr & ~(uint64_t)(3u << 22)));
+        __asm__ volatile("fdiv %s0, %s1, %s2" : "=w"(z) : "w"(x), "w"(y));
+        __asm__ volatile("msr fpcr, %0" : : "r"(fpcr));
+        r = u(z);
+    }
+#elif defined(__arm__)
     {
         uint32_t fpscr;
         float x = f(a), y = f(b), z;

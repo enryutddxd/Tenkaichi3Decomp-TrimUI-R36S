@@ -62,6 +62,10 @@ static inline uint64_t cnt_read(void) {
     uint64_t v;
     __asm__ volatile("mrrc p15, 1, %Q0, %R0, c14" : "=r"(v));
     return v;
+#elif defined(__aarch64__)
+    uint64_t v;
+    __asm__ volatile("isb; mrs %0, cntvct_el0" : "=r"(v));
+    return v;
 #else
     return 0;
 #endif
@@ -94,7 +98,7 @@ static void clk_init(void) {
         volatile double seen = -1.0; /* (the counter's rate as measured; -1: not readable) */
         const char *e = getenv("R36_CLOCK");
         clock_gettime(CLOCK_MONOTONIC, &sT0);
-#ifdef __arm__
+#if defined(__arm__) || defined(__aarch64__)
         if (e == NULL || atoi(e) != 0) {
             struct sigaction sa, old;
             memset(&sa, 0, sizeof(sa));
@@ -502,6 +506,11 @@ SceUID sceKernelAllocMemBlock(const char *name, int type, SceSize size, void *op
             if (posix_memalign(&p, 4096, size) != 0) {
                 return (SceUID)0x80020000;
             }
+#ifdef __aarch64__
+            if ((uintptr_t)p >> 32) {
+                R36_LogLine("tsp: a memory block of %u KB above 4 GB (%p): the game cannot use it\n", (unsigned)(size >> 10), p);
+            }
+#endif
             sBlock[i] = p;
             return 0x300 + i;
         }
@@ -906,13 +915,90 @@ static void alt_stack(void) {
     stack_note();
 }
 /* every pthread made (the renderer's, SDL's, ours) starts here first: build.py links pthread_create through this */
-typedef struct Tramp { void *(*fn)(void *); void *arg; } Tramp;
+typedef struct Tramp { void *(*fn)(void *); void *arg; int stack; } Tramp;
+#ifdef __aarch64__
+/* The 64-bit build (TrimUI): the game's pointers are 4 bytes wide, and it keeps addresses of its local variables, so
+   every thread of ours runs on a stack below 4 GB (the C library's own are mapped far above). Stacks are kept for the
+   next thread once the one on it has ended (a second after, so that it has left them for good). */
+#include <sys/mman.h>
+#define LOW_STACKS 64
+static struct { uintptr_t base; size_t size; int busy; struct timespec freed; } sStk[LOW_STACKS];
+static pthread_mutex_t sStkLock = PTHREAD_MUTEX_INITIALIZER;
+static uintptr_t sStkNext = 0xC0000000u;
+static int low_stack(size_t size) {
+    struct timespec now;
+    int i, slot = -1;
+    size = (size + 0xFFFFu) & ~(size_t)0xFFFFu;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    pthread_mutex_lock(&sStkLock);
+    for (i = 0; i < LOW_STACKS; i++) {
+        if (sStk[i].base != 0 && !sStk[i].busy && sStk[i].size >= size && now.tv_sec - sStk[i].freed.tv_sec >= 2) {
+            sStk[i].busy = 1;
+            pthread_mutex_unlock(&sStkLock);
+            return i;
+        }
+        if (sStk[i].base == 0 && slot < 0) {
+            slot = i;
+        }
+    }
+    while (slot >= 0 && sStkNext + size + 0x10000u <= 0xFFFF0000u) {
+        uintptr_t at = sStkNext + 0x10000u; /* (a page left unmapped below each: an overflow faults) */
+        void *p = mmap((void *)at, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+        sStkNext = at + size;
+        if (p == (void *)at) {
+            sStk[slot].base = at;
+            sStk[slot].size = size;
+            sStk[slot].busy = 1;
+            pthread_mutex_unlock(&sStkLock);
+            return slot;
+        }
+        if (p != MAP_FAILED) {
+            munmap(p, size);
+        }
+        {   /* (the address only a hint, not taken: if nothing is mapped there, taken outright) */
+            unsigned char v;
+            size_t o;
+            for (o = 0; o < size && mincore((void *)(at + o), 4096, &v) != 0 && errno == ENOMEM; o += 4096) {
+            }
+            if (o >= size && mmap((void *)at, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0) == (void *)at) {
+                sStk[slot].base = at;
+                sStk[slot].size = size;
+                sStk[slot].busy = 1;
+                pthread_mutex_unlock(&sStkLock);
+                return slot;
+            }
+        }
+    }
+    pthread_mutex_unlock(&sStkLock);
+    return -1;
+}
+static void low_stack_done(void *p) {
+    int i = (int)(intptr_t)p;
+    pthread_mutex_lock(&sStkLock);
+    clock_gettime(CLOCK_MONOTONIC, &sStk[i].freed);
+    sStk[i].busy = 0;
+    pthread_mutex_unlock(&sStkLock);
+}
+#endif
 static void *tramp(void *p) {
     Tramp t = *(Tramp *)p;
+    void *r;
     free(p);
     alt_stack();
     { extern void R36_ProfThread(void); R36_ProfThread(); } /* (r36s_prof.c) */
-    return t.fn(t.arg);
+#ifdef __aarch64__
+    if ((uintptr_t)&r >> 32) {
+        R36_LogLine("tsp: a thread's stack above 4 GB (%p): the game cannot use it\n", (void *)&r);
+    }
+    if (t.stack >= 0) {
+        pthread_cleanup_push(low_stack_done, (void *)(intptr_t)t.stack);
+        r = t.fn(t.arg);
+        pthread_cleanup_pop(1);
+        return r;
+    }
+#endif
+    r = t.fn(t.arg);
+    return r;
 }
 extern int __real_pthread_create(pthread_t *th, const pthread_attr_t *attr, void *(*fn)(void *), void *arg);
 int __wrap_pthread_create(pthread_t *th, const pthread_attr_t *attr, void *(*fn)(void *), void *arg) {
@@ -922,6 +1008,42 @@ int __wrap_pthread_create(pthread_t *th, const pthread_attr_t *attr, void *(*fn)
     }
     t->fn = fn;
     t->arg = arg;
+    t->stack = -1;
+#ifdef __aarch64__
+    {
+        pthread_attr_t a;
+        size_t size = 0;
+        int detach = PTHREAD_CREATE_JOINABLE, r;
+        void *have = NULL;
+        if (attr != NULL) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            pthread_attr_getstackaddr(attr, &have); /* (NULL when none given; getstack's address is the top less the size) */
+#pragma clang diagnostic pop
+            pthread_attr_getstacksize(attr, &size);
+            pthread_attr_getdetachstate(attr, &detach);
+        }
+        if (have == NULL) {
+            size = size < (1u << 20) ? (1u << 20) : size;
+            t->stack = low_stack(size);
+            if (t->stack < 0) {
+                R36_LogLine("r36: no room below 4 GB for a thread's stack of %u KB\n", (unsigned)(size >> 10));
+                free(t);
+                return EAGAIN;
+            }
+            pthread_attr_init(&a);
+            pthread_attr_setdetachstate(&a, detach);
+            pthread_attr_setstack(&a, (void *)sStk[t->stack].base, sStk[t->stack].size);
+            r = __real_pthread_create(th, &a, tramp, t);
+            pthread_attr_destroy(&a);
+            if (r != 0) {
+                low_stack_done((void *)(intptr_t)t->stack);
+                free(t);
+            }
+            return r;
+        }
+    }
+#endif
     return __real_pthread_create(th, attr, tramp, t);
 }
 static void put(int fd, const char *b, int n) {
@@ -965,6 +1087,30 @@ static void crash(int sig, siginfo_t *si, void *ctx) {
     n += snprintf(b + n, sizeof(b) - (size_t)n, "\n");
     put(fd, b, n);
     put(2, b, n);
+#elif defined(__aarch64__)
+    n = snprintf(b, sizeof(b), "tsp: CRASH: signal %d (%s), address %p, thread %d\n  pc %lx lr %lx sp %lx fp %lx\n",
+                 sig, sig == SIGSEGV ? "SEGV" : sig == SIGBUS ? "BUS" : sig == SIGILL ? "ILL" : sig == SIGFPE ? "FPE" : sig == SIGABRT ? "ABRT" : "?",
+                 si->si_addr, tId, (unsigned long)m->pc, (unsigned long)m->regs[30], (unsigned long)m->sp, (unsigned long)m->regs[29]);
+    for (int r = 0; r < 29; r++) {
+        n += snprintf(b + n, sizeof(b) - (size_t)n, "%sx%d %lx", r % 6 == 0 ? "\n  " : " ", r, (unsigned long)m->regs[r]);
+    }
+    n += snprintf(b + n, sizeof(b) - (size_t)n, "\n");
+    put(fd, b, n);
+    put(2, b, n);
+    n = snprintf(b, sizeof(b), "  stack %lx..%lx, calls:", (unsigned long)tStackLo, (unsigned long)tStackHi);
+    if (tStackHi != 0 && m->sp >= tStackLo && m->sp < tStackHi) {
+        const unsigned long *sp = (const unsigned long *)m->sp, *end = (const unsigned long *)tStackHi;
+        for (; sp < end && k < 40 && n < (int)sizeof(b) - 20; sp++) {
+            unsigned long w = *sp;
+            if (w >= (unsigned long)__executable_start && w < (unsigned long)etext) {
+                n += snprintf(b + n, sizeof(b) - (size_t)n, " %lx", w);
+                k++;
+            }
+        }
+    }
+    n += snprintf(b + n, sizeof(b) - (size_t)n, "\n");
+    put(fd, b, n);
+    put(2, b, n);
 #else
     (void)m; (void)k;
     n = snprintf(b, sizeof(b), "r36: CRASH: signal %d, address %p\n", sig, si->si_addr);
@@ -977,6 +1123,8 @@ static void crash(int sig, siginfo_t *si, void *ctx) {
         const char *what[4] = {"pc", "lr", "sp", "addr"};
 #ifdef __arm__
         want[0] = m->arm_pc; want[1] = m->arm_lr; want[2] = m->arm_sp; want[3] = (unsigned long)si->si_addr;
+#elif defined(__aarch64__)
+        want[0] = m->pc; want[1] = m->regs[30]; want[2] = m->sp; want[3] = (unsigned long)si->si_addr;
 #else
         want[0] = want[1] = want[2] = want[3] = 0;
 #endif
@@ -1080,6 +1228,11 @@ __attribute__((constructor)) static void malloc_init(void) {
         mallopt(M_TRIM_THRESHOLD, 256 << 20);
         mallopt(M_TOP_PAD, 4 << 20);
     }
+#ifdef __aarch64__
+    /* (64-bit: every block in the break area after the program, below 4 GB: no blocks of their own, one arena) */
+    mallopt(M_MMAP_MAX, 0);
+    mallopt(M_ARENA_MAX, 1);
+#endif
 }
 __attribute__((constructor)) static void crash_init(void) {
     struct sigaction sa;

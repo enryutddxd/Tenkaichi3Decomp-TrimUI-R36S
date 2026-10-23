@@ -60,7 +60,9 @@ extern void Vita_Log(const char *fmt, ...);
 #define GS_H 448.0f
 /* The picture on the 960 x 544 screen: all of it (the game projects its 3D for that shape, src/battle/btl_cam.c
    with Port_WideFactor; menus and films are stretched to it), or the console's 4:3 in the middle (wide=0). */
-#ifdef PORT_R36S
+#if defined(PORT_TSP)
+int gVitaWide = 1; /* (the TrimUI Smart Pro's screen is 16:9, as the Vita's) */
+#elif defined(PORT_R36S)
 int gVitaWide = 0; /* (the R36S's screen is 4:3, the console's own shape) */
 #else
 int gVitaWide = 1;
@@ -74,7 +76,11 @@ int gVitaPbufMb;  /* bt3.txt pbuf=<MB>: the parameter buffer, 0 vitaGL's default
    once and described again for the size of the moment (vitaGL change, vglSwapResolution); the change is made at a
    picture's end (GsGpu_FrameEnd, scr_switch). bt3.txt menuhi=0: 640 x 368 everywhere, as before. */
 #ifdef PORT_R36S /* the R36S: its own screen's 640 x 480 for both (bt3.txt res=WxH for the fights, menures=WxH) */
+#ifdef PORT_TSP /* (the TrimUI Smart Pro: 1280 x 720; the fights at 960 x 540, scaled up) */
+int gR36FightW = 960, gR36FightH = 540, gR36MenuW = 1280, gR36MenuH = 720;
+#else
 int gR36FightW = 640, gR36FightH = 480, gR36MenuW = 640, gR36MenuH = 480;
+#endif
 #define SCR_W_FIGHT gR36FightW
 #define SCR_H_FIGHT gR36FightH
 #define SCR_W_MENU gR36MenuW

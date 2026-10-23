@@ -29,12 +29,17 @@ import portsrc, eeconst
 
 R = ROOT / "port/r36s"
 V = ROOT / "port/vita"
-OBJ = ROOT / "port/build/obj_r36s"
-OUT = ROOT / "port/build/r36s"
-GEN = ROOT / "port/build/gen/r36s"
+# BT3_PLATFORM=tsp: the TrimUI Smart Pro (stock firmware, through PortMaster): a 64-bit ARM program (its GPU driver is
+# 64-bit only), with the game's pointers kept 4 bytes wide as in the PC's 64-bit build (port/tools/ptr32.py, irfix.py:
+# every pointer of the game's text is `* __ptr32 __uptr`, all game memory below 4 GB). See port/trimui/README.md.
+TSP = os.environ.get("BT3_PLATFORM", "r36s") == "tsp"
+PLAT = "tsp" if TSP else "r36s"
+OBJ = ROOT / f"port/build/obj_{PLAT}"
+OUT = ROOT / f"port/build/{PLAT}"
+GEN = ROOT / f"port/build/gen/{PLAT}"
 ZIG = shlex.split(os.environ.get("BT3_R36S_ZIG", f"{shlex.quote(sys.executable)} -m ziglang"))
-BU = os.environ.get("BT3_R36S_BINUTILS", "arm-linux-gnueabihf-")
-TARGET = ["-target", "arm-linux-gnueabihf.2.28", "-mcpu=cortex_a35-neon"]
+BU = os.environ.get("BT3_R36S_BINUTILS", "aarch64-linux-gnu-" if TSP else "arm-linux-gnueabihf-")
+TARGET = ["-target", "aarch64-linux-gnu.2.33", "-mcpu=cortex_a53"] if TSP else ["-target", "arm-linux-gnueabihf.2.28", "-mcpu=cortex_a35-neon"]
 CC = ZIG + ["cc"] + TARGET
 CXX = ZIG + ["c++"] + TARGET
 
@@ -60,7 +65,12 @@ COMMON = FPU + ["-O2", "-g", "-fno-strict-aliasing", "-ffp-contract=off", "-w", 
           "-Wno-error=int-conversion", "-Wno-error=incompatible-function-pointer-types", "-Wno-error=implicit-function-declaration",
           "-Wno-error=incompatible-pointer-types", "-Wno-error=return-type", "-Wno-error=int-to-pointer-cast",
           "-DPORT_VITA=1", "-DPORT_VITA_FIXED=1", "-DPORT_R36S=1", '-DPORT_VITA_SFX=".txt"', "-DPORT_VITA_GFX=1", "-DPORT_VITA_VGL=1",
-          "-DMPEG2_PLAYER=1", "-DPORT_VITA_SOUND=1", "-DPORT_VITA_NATIVE=1", "-DPORT_VITA_RELEASE=1"]
+          "-DMPEG2_PLAYER=1", "-DPORT_VITA_SOUND=1", "-DPORT_VITA_NATIVE=1", "-DPORT_VITA_RELEASE=1"] + \
+         (["-DPORT_TSP=1", "-fms-extensions"] if TSP else [])
+# (the 64-bit build's parse of the preprocessed text: ptr32.transform, srcfix.shifts)
+P64_ARGS = ["-x", "cpp-output", "--target=aarch64-linux-gnu", "-std=gnu99", "-fsigned-char", "-fno-short-enums", "-fms-extensions", "-w",
+            "-Wno-error=return-type", "-Wno-error=return-mismatch", "-Wno-error=int-conversion", "-Wno-error=incompatible-pointer-types",
+            "-Wno-error=implicit-function-declaration", "-Wno-error=incompatible-function-pointer-types", "-Wno-error=int-to-pointer-cast"]
 NOBUILTIN = ["-fno-builtin-" + n for n in "sinf cosf tanf asinf acosf atanf atan2f sqrtf powf floorf ceilf fabsf fmodf expf logf sin cos tan sqrt "
              "pow floor ceil fabs abs labs rand srand printf sprintf snprintf fprintf vsprintf puts putchar fputs fwrite strcpy strncpy strcat "
              "strncat strlen strcmp strncmp strchr strrchr strstr malloc calloc realloc free exit abort atoi memcmp memmove".split()]
@@ -96,13 +106,37 @@ def rename(r, o):
     return r
 
 
-def compile_ee(cmd, src, o, game=False):
+def p64(text, i, game):
+    """The 64-bit build's rewriting: the game's pointers 4 bytes wide (with its calls right to left), the PS2's shifts."""
+    import clang.cindex as ci
+    if not ci.Config.loaded and os.environ.get("BT3_LIBCLANG"):
+        ci.Config.set_library_file(os.environ["BT3_LIBCLANG"])
+    import ptr32, srcfix
+    if not any(g for _, g in ptr32.origins(text.encode("latin-1"))):
+        return text  # (no game text in it: nothing to rewrite)
+    std = "-std=gnu89" if game else "-std=gnu99"
+    args = [std if a == "-std=gnu99" else a for a in P64_ARGS]
+    # (a type of the newer arm_neon.h the libclang of pip does not know: declared for the parse, taken out after)
+    pre = "typedef unsigned char __mfp8;\n" if "__mfp8" in text else ""
+    i.write_text(pre + text, encoding="latin-1")
+    data = ptr32.transform(str(i), args).encode("latin-1")
+    data, _ = srcfix.shifts(data, args)
+    out = data.decode("latin-1")
+    return out[len(pre):] if pre and out.startswith(pre) else out
+
+
+def compile_ee(cmd, src, o, game=False, ee=True, p32=True):
     r = subprocess.run([a for a in cmd if a != "-c"] + ["-E", str(src)], cwd=ROOT, capture_output=True, text=True, encoding="latin-1")
     if r.returncode:
         return r
     i = pathlib.Path(str(o)[:-2] + ".i")
-    text = eeconst.transform(r.stdout)
-    if game:
+    text = eeconst.transform(r.stdout) if ee else r.stdout
+    if TSP and p32:
+        try:
+            text = p64(text, i, game)
+        except Exception as e:
+            return subprocess.CompletedProcess(cmd, 1, "", f"error: ptr32: {e}\n")
+    elif game:
         try:
             text, _ = r2l(text)
         except Exception as e:
@@ -118,6 +152,17 @@ def compile_ee(cmd, src, o, game=False):
             skip = True
         elif not a.startswith("-D"):
             cc2.append(a)
+    if TSP:  # through LLVM IR: irfix.py repairs what the code generator cannot select for 4-byte pointers
+        import irfix
+        ll = pathlib.Path(str(o)[:-2] + ".ll")
+        r = run([a for a in cc2 if a != "-c"] + ["-S", "-emit-llvm", "-x", "c", str(i), "-o", str(ll)])
+        if r.returncode:
+            return r
+        fixed, _ = irfix.fix(ll.read_text(encoding="latin-1"))
+        ll.write_text(fixed, encoding="latin-1")
+        opt = [a for a in cc2 if a.startswith("-O")][-1:] or ["-O2"]
+        incs = [a for a in cc2 if a.startswith("-I")]  # (for the module's `.include "labels.inc"`)
+        return rename(run(CC + ["-c", "-g"] + opt + incs + [f"-Wa,{a}" for a in incs] + [str(ll), "-o", str(o)]), o)
     return rename(run(cc2 + ["-x", "c", str(i), "-o", str(o)]), o)
 
 
@@ -177,7 +222,7 @@ def data_tables():
         s = GEN / (name + ".s")
         s.write_text("\n".join(lines) + "\n")
         o = OBJ / ("data_" + re.sub(r"\W", "_", name) + ".o")
-        r = rename(run([BU + "as", "-mfloat-abi=hard", "-mfpu=vfpv3", str(s), "-o", str(o)]), o)
+        r = rename(run([BU + "as"] + ([] if TSP else ["-mfloat-abi=hard", "-mfpu=vfpv3"]) + [str(s), "-o", str(o)]), o)
         if r.returncode:
             print("FAILED", name, r.stderr.splitlines()[0][:200])
         else:
@@ -213,7 +258,7 @@ def port_sources():
 # objects' C library calls get their versions there); GCC's C library headers are newer, so nothing that would pick
 # newer entry points (fortify, C2x names) is on. BT3_GCC=0: clang for these too.
 GCC = os.environ.get("BT3_R36S_GCC", BU + "gcc")
-USE_GCC = os.environ.get("BT3_GCC", "1") != "0" and shutil.which(GCC) is not None
+USE_GCC = os.environ.get("BT3_GCC", "1") != "0" and shutil.which(GCC) is not None and not TSP
 GCC_FLAGS = ["-U_TIME_BITS", "-U_FILE_OFFSET_BITS", "-mcpu=cortex-a35", "-mfpu=neon-fp-armv8", "-mfloat-abi=hard", "-marm", "-fno-pie", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0",
              "-fno-stack-protector", "-fno-stack-clash-protection", "-freorder-blocks-and-partition"]
 GCC_DROP = ("-Wno-error=incompatible-function-pointer-types", "-Wno-error=int-conversion", "-Wno-error=implicit-function-declaration",
@@ -231,11 +276,25 @@ def cc_port(item):
             base += ["-mfpu=vfpv4", "-fno-tree-vectorize", "-fno-tree-slp-vectorize"]
     if fresh(o, f):
         return o, f, ""
+    if TSP and kind in ("gs", "hard", "vu0"):  # (through the 64-bit build's rewriting: the game's headers they include)
+        if kind == "gs":
+            cmd = base + ["-O3", "-include", "r36s_force.h", "-include", "vita_cold.h", "-Dgetenv=Vita_GsGetenv"] + SHIM_INC + \
+                  [f"-I{ROOT / 'port/src/gs'}", f"-I{V / 'sdlshim'}"]
+        elif kind == "hard":
+            cmd = base + ["-O3", "-include", "r36s_force.h", "-include", "vita_cold.h"] + SHIM_INC + [f"-I{GEN}"]
+        else:
+            fast = ["-include", "vita_vu0_inline.h", "-DRefVu0_AddBits=VitaVu_AddBits", "-DRefVu0_MulBits=VitaVu_MulBits", "-DRefVu0_DivBits=VitaVu_DivBits"]
+            if f.name == "vu0_b.c":
+                fast += [f"-DRefVu0_{n}=VitaVuF_{n}" for n in ("Add", "Sub", "Mul", "Div")]
+            cmd = base + ABI + NOVEC + ["-O3"] + fast + ["-include", "math.h", "-include", "stdlib.h", "-include", "port_libm.h",
+                                                       "-include", "vu0_names.h", "-DREF_VU0_EXTERN_ARITH"]
+        r = compile_ee(cmd, f, o, ee=False)
+        return (o if r.returncode == 0 else None), f, r.stderr
     if kind == "gs":
         r = run(base + ["-O3", "-include", "r36s_force.h", "-include", "vita_cold.h", "-Dgetenv=Vita_GsGetenv"] + SHIM_INC +
                 [f"-I{ROOT / 'port/src/gs'}", f"-I{V / 'sdlshim'}", str(f), "-o", str(o)])
     elif kind == "hard":
-        if f.name in NEON_FILES and not USE_GCC:
+        if f.name in NEON_FILES and not USE_GCC and not TSP:
             base = base + ["-mcpu=cortex_a35"]
         r = run(base + ["-O3", "-include", "r36s_force.h", "-include", "vita_cold.h"] + SHIM_INC + [f"-I{GEN}", str(f), "-o", str(o)])
     elif kind == "shim":
@@ -255,7 +314,7 @@ def cc_libm(f):
     o = OBJ / ("nl_" + f.stem + ".o")
     if fresh(o, f):
         return o, f, ""
-    r = compile_ee(CC + ["-std=gnu89", "-c"] + COMMON + ABI + NOVEC + NOBUILTIN + ["-Iport/include", f"-I{f.parent}", "-include", "newlib_shim.h"], f, o)
+    r = compile_ee(CC + ["-std=gnu89", "-c"] + COMMON + ABI + NOVEC + NOBUILTIN + ["-Iport/include", f"-I{f.parent}", "-include", "newlib_shim.h"], f, o, p32=False)
     return (o if r.returncode == 0 else None), f, r.stderr
 
 
@@ -321,7 +380,7 @@ def sdl_stub():
     return so
 
 
-LIBGCC = next(iter(sorted(pathlib.Path("/usr/lib/gcc-cross/arm-linux-gnueabihf").glob("*/libgcc.a"))), "")  # (apt: gcc-arm-linux-gnueabihf)
+LIBGCC = next(iter(sorted(pathlib.Path("/usr/lib/gcc-cross/" + ("aarch64-linux-gnu" if TSP else "arm-linux-gnueabihf")).glob("*/libgcc.a"))), "")  # (apt: gcc-arm-linux-gnueabihf / gcc-aarch64-linux-gnu)
 
 
 def link_cmd(objs, extra):
@@ -355,11 +414,12 @@ def link():
 
 
 def package():
-    """The ArkOS / PortMaster layout: ports/Tenkaichi3.sh and ports/bt3/ (the program, its notes, the disc folder)."""
+    """The ArkOS / PortMaster layout: ports/Tenkaichi3.sh and ports/bt3/ (the program, its notes, the disc folder).
+    The TrimUI Smart Pro (stock system, PortMaster): Roms/PORTS/Tenkaichi3.sh and Data/ports/bt3/."""
     pkg = OUT / "package"
     if pkg.exists():
         shutil.rmtree(pkg)
-    game = pkg / "ports/bt3"
+    game = pkg / ("Data/ports/bt3" if TSP else "ports/bt3")
     (game / "disc").mkdir(parents=True)
     shutil.copy(OUT / "bt3", OUT / "bt3.unstripped")  # (for reading crash.txt)
     shutil.copy(OUT / "bt3", game / "bt3")
@@ -375,17 +435,20 @@ def package():
             sym.append(f"{w[0]} {int(w[1], 16):x} {w[3]}\n")
     (game / "bt3.sym").write_text("".join(sym))
     os.chmod(game / "bt3", 0o755)
-    shutil.copy(R / "package/Tenkaichi3.sh", pkg / "ports/Dragon Ball Z Budokai Tenkaichi 3.sh")
-    os.chmod(pkg / "ports/Dragon Ball Z Budokai Tenkaichi 3.sh", 0o755)
-    shutil.copy(R / "package/README.txt", game / "README.txt")
+    P = ROOT / "port/trimui/package" if TSP else R / "package"
+    sh = pkg / ("Roms/PORTS" if TSP else "ports") / "Dragon Ball Z Budokai Tenkaichi 3.sh"
+    sh.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(P / "Tenkaichi3.sh", sh)
+    os.chmod(sh, 0o755)
+    shutil.copy(P / "README.txt", game / "README.txt")
     (game / "disc/PUT_YOUR_DISC_FILES_HERE.txt").write_text(
         "Copy SLUS_216.78 and the BIN and DATA folders of your own USA disc (SLUS-21678) here.\n"
         "Copia aqui SLUS_216.78 y las carpetas BIN y DATA de tu propio disco USA (SLUS-21678).\n")
     shutil.copy(ROOT / "LICENSE", game / "LICENSE.txt")
-    zipname = OUT / "Tenkaichi3Decomp-R36S.zip"
+    zipname = OUT / ("Tenkaichi3Decomp-TrimUI.zip" if TSP else "Tenkaichi3Decomp-R36S.zip")
     if zipname.exists():
         zipname.unlink()
-    subprocess.run(["zip", "-qr", str(zipname), "ports"], cwd=pkg, check=True)
+    subprocess.run(["zip", "-qr", str(zipname)] + (["Roms", "Data"] if TSP else ["ports"]), cwd=pkg, check=True)
     print(f"{zipname}: {zipname.stat().st_size} bytes")
 
 

@@ -73,15 +73,22 @@ static inline int ret_addr(uintptr_t a) {
         return 0;
     }
     i = *(const uint32_t *)(a - 4);
+#ifdef __aarch64__
+    return (i & 0xFC000000u) == 0x94000000u || (i & 0xFFFFFC1Fu) == 0xD63F0000u; /* (bl, blr) */
+#endif
     return (i & 0x0F000000u) == 0x0B000000u || (i & 0xFE000000u) == 0xFA000000u || (i & 0x0FFFFFF0u) == 0x012FFF30u;
 }
-#ifndef __arm__ /* (the tests built for the PC: nothing noted) */
+#if !defined(__arm__) && !defined(__aarch64__) /* (the tests built for the PC: nothing noted) */
 static void note(void *ctx, uint32_t w) { (void)ctx; (void)w; }
 #else
 static void note(void *ctx, uint32_t w) {
     ucontext_t *uc = (ucontext_t *)ctx;
     Slot *s;
+#ifdef __aarch64__
+    uintptr_t pc = uc->uc_mcontext.pc, lr = uc->uc_mcontext.regs[30], fp = uc->uc_mcontext.regs[29], sp = uc->uc_mcontext.sp;
+#else
     uintptr_t pc = uc->uc_mcontext.arm_pc, lr = uc->uc_mcontext.arm_lr, fp = uc->uc_mcontext.arm_fp, sp = uc->uc_mcontext.arm_sp;
+#endif
     uint32_t c1 = 0, c2 = 0, h, k;
     if (tSlot < 0 || (s = &sSlot[tSlot])->e == NULL) {
         return;
@@ -89,10 +96,10 @@ static void note(void *ctx, uint32_t w) {
     if (in_text(pc)) {
         /* (this program's frames: fp points at the saved fp, the return address above it) */
         uintptr_t r1 = 0, r2 = 0;
-        if (fp >= sp && fp + 8 <= tHi && (fp & 3) == 0) {
+        if (fp >= sp && fp + 2 * sizeof(uintptr_t) <= tHi && (fp & 3) == 0) {
             r1 = ((const uintptr_t *)fp)[1];
             uintptr_t f2 = ((const uintptr_t *)fp)[0];
-            if (f2 > fp && f2 + 8 <= tHi && (f2 & 3) == 0) {
+            if (f2 > fp && f2 + 2 * sizeof(uintptr_t) <= tHi && (f2 & 3) == 0) {
                 r2 = ((const uintptr_t *)f2)[1];
             }
         }

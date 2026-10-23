@@ -347,8 +347,13 @@ static inline uint32_t fbits(float f) {
 static inline int32_t toi_vu(float f, float scale) {
     float d = f * scale, r;
     int32_t i;
+#if defined(__aarch64__) /* (the same: toward zero, saturated) */
+    (void)r;
+    __asm__("fcvtzs %w0, %s1" : "=r"(i) : "w"(d));
+#else
     __asm__("vcvt.s32.f32 %0, %1" : "=t"(r) : "t"(d));
     memcpy(&i, &r, 4);
+#endif
     return i;
 }
 /* ClipPlane_EdgeParam then ClipVtx_Lerp(o, next, cur, t): o = next * t + cur * (1 - t) */
@@ -752,7 +757,11 @@ static int vuf_test(void) {
     RefVec4 keep[32], keepAcc;
     char line[900];
     int len, k, i, bad = 0;
+#if defined(__aarch64__)
+    { uint64_t c; __asm__ volatile("mrs %0, fpcr" : "=r"(c)); fpscr = (uint32_t)c; }
+#else
     __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr));
+#endif
     if (((fpscr >> 22) & 3) != 3) {
         return 0; /* not yet in the game's mode (round toward zero): the library's routines meanwhile */
     }
