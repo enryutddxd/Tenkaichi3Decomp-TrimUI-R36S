@@ -438,10 +438,11 @@ def package():
     P = ROOT / "port/trimui/package" if TSP else R / "package"
     sh = pkg / ("Roms/PORTS" if TSP else "ports") / "Dragon Ball Z Budokai Tenkaichi 3.sh"
     sh.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy(P / "Tenkaichi3.sh", sh)
+    REL = TSP and os.environ.get("BT3_RELEASE") == "1"  # (the release: the clean launcher, no measurements, no App folder)
+    shutil.copy(P / ("Tenkaichi3_release.sh" if REL else "Tenkaichi3.sh"), sh)
     os.chmod(sh, 0o755)
     shutil.copy(P / "README.txt", game / "README.txt")
-    if TSP:  # (also as a TrimUI App: started without PortMaster)
+    if TSP and not REL:  # (also as a TrimUI App: started without PortMaster)
         shutil.copytree(P / "app", pkg / "Apps/BT3")
         os.chmod(pkg / "Apps/BT3/launch.sh", 0o755)
     (game / "disc/PUT_YOUR_DISC_FILES_HERE.txt").write_text(
@@ -453,10 +454,10 @@ def package():
         shutil.copy(ROOT / "THIRD_PARTY.md", game / "THIRD_PARTY.txt")
     else:
         shutil.copy(ROOT / "LICENSE", game / "LICENSE.txt")
-    zipname = OUT / ("Tenkaichi3Decomp-TrimUI.zip" if TSP else "Tenkaichi3Decomp-R36S.zip")
+    zipname = OUT / (("Tenkaichi3Decomp-TrimUI-release.zip" if REL else "Tenkaichi3Decomp-TrimUI.zip") if TSP else "Tenkaichi3Decomp-R36S.zip")
     if zipname.exists():
         zipname.unlink()
-    subprocess.run(["zip", "-qr", str(zipname)] + (["Roms", "Data", "Apps"] if TSP else ["ports"]), cwd=pkg, check=True)
+    subprocess.run(["zip", "-qr", str(zipname)] + ((["Roms", "Data"] if REL else ["Roms", "Data", "Apps"]) if TSP else ["ports"]), cwd=pkg, check=True)
     print(f"{zipname}: {zipname.stat().st_size} bytes")
 
 
