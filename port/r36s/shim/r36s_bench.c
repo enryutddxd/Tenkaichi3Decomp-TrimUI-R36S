@@ -40,7 +40,8 @@ extern void R36_LogLine(const char *fmt, ...);
     X(void, glGetShaderiv, (GLuint, GLenum, GLint *)) X(void, glGetShaderInfoLog, (GLuint, GLsizei, GLsizei *, GLchar *)) \
     X(const GLubyte *, glGetString, (GLenum)) X(void, glDepthFunc, (GLenum)) X(void, glUniformBlockBinding, (GLuint, GLuint, GLuint)) \
     X(GLuint, glGetUniformBlockIndex, (GLuint, const GLchar *)) X(void, glBindBufferRange, (GLenum, GLuint, GLuint, GLintptr, GLsizeiptr)) \
-    X(void, glBufferSubData, (GLenum, GLintptr, GLsizeiptr, const void *)) X(void, glActiveTexture, (GLenum))
+    X(void, glBufferSubData, (GLenum, GLintptr, GLsizeiptr, const void *)) X(void, glActiveTexture, (GLenum)) \
+    X(void, glBlitFramebuffer, (GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum))
 #define X(r, n, p) static r(*b_##n) p;
 BL(X)
 #undef X
@@ -104,6 +105,7 @@ static GLuint mk(const char *vs, int nu) {
 typedef struct { float x, y, z, w, s, t, q; uint8_t c[4]; } BV;
 #define NV (3 * 6000)
 static GLuint sVbo, sIbo, sTex[2], sProgA, sProgB, sProgU, sUbo, sFbo[2], sCol[2], sDep[2];
+static GLuint sFboT, sColT, sDepT; /* (a picture whose colour and depth are textures, as the renderer's display buffers) */
 static GLint sUA, sUB;
 static float sU[NU * 4];
 static uint16_t sIdx[NV];
@@ -147,10 +149,12 @@ static void base_state(GLuint fbo) {
     b_glDisable(GL_BLEND);
 }
 
-enum { T_SAME, T_VAP, T_FIRST, T_BASEV, T_CLIENTIDX, T_TEX, T_PROG, T_U16, T_U368, T_UBO, T_TP, T_BLEND, T_FBO, T_BIG, T_N };
+enum { T_SAME, T_VAP, T_FIRST, T_BASEV, T_CLIENTIDX, T_TEX, T_PROG, T_U16, T_U368, T_UBO, T_TP, T_BLEND, T_FBO, T_BIG,
+       T_SWPLAIN, T_SWCOL, T_SWDEP, T_SWBLIT, T_N };
 static const char *kName[T_N] = {"nothing changed", "attribute pointers", "first vertex", "base vertex (indices)", "indices from memory",
                                  "texture bound", "program", "16 uniform vectors", "368 uniform vectors", "uniform buffer range",
-                                 "texture parameters", "blend on/off", "framebuffer every 20 draws", "large draws (3000 triangles)"};
+                                 "texture parameters", "blend on/off", "framebuffer every 20 draws", "large draws (3000 triangles)",
+                                 "away+back, plain texture", "away+back, reading its colour", "away+back, reading its depth", "away+back, blit of its colour"};
 #define ND 2000
 static void run_test(int t, GLuint fbo, double *cpu, double *gpu) {
     int i, n = t == T_BIG ? 100 : ND;
@@ -190,6 +194,22 @@ static void run_test(int t, GLuint fbo, double *cpu, double *gpu) {
             b_glDrawArrays(GL_TRIANGLES, f, 3);
             break;
         case T_BIG: b_glDrawArrays(GL_TRIANGLES, 0, 9000); break;
+        case T_SWPLAIN: case T_SWCOL: case T_SWDEP: case T_SWBLIT:
+            if (i % 20 == 19) { /* (away to the small target, one draw reading the picture (or not), and back) */
+                if (t == T_SWBLIT) {
+                    b_glBindFramebuffer(GL_READ_FRAMEBUFFER, sFboT);
+                    b_glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sFbo[1]);
+                    b_glBlitFramebuffer(0, 0, 960, 544, 0, 0, 256, 256, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+                } else {
+                    b_glBindFramebuffer(GL_FRAMEBUFFER, sFbo[1]);
+                    b_glBindTexture(GL_TEXTURE_2D, t == T_SWCOL ? sColT : t == T_SWDEP ? sDepT : sTex[0]);
+                    b_glDrawArrays(GL_TRIANGLES, f, 3);
+                    b_glBindTexture(GL_TEXTURE_2D, sTex[0]);
+                }
+                b_glBindFramebuffer(GL_FRAMEBUFFER, sFboT);
+            }
+            b_glDrawArrays(GL_TRIANGLES, f, 3);
+            break;
         }
     }
     t1 = now_us();
@@ -376,10 +396,24 @@ void R36_Bench(void) {
     b_glUniformBlockBinding(sProgU, b_glGetUniformBlockIndex(sProgU, "B"), 0);
     fbo_make(0, 960, 544);
     fbo_make(1, 256, 256);
+    b_glGenTextures(1, &sColT);
+    b_glBindTexture(GL_TEXTURE_2D, sColT);
+    b_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 854, 480, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    b_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    b_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    b_glGenTextures(1, &sDepT);
+    b_glBindTexture(GL_TEXTURE_2D, sDepT);
+    b_glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, 854, 480, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, NULL);
+    b_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    b_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    b_glGenFramebuffers(1, &sFboT);
+    b_glBindFramebuffer(GL_FRAMEBUFFER, sFboT);
+    b_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sColT, 0);
+    b_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, sDepT, 0);
     for (t = 0; t < T_N; t++) {
         best[t][0] = best[t][1] = 1e18;
         for (k = 0; k < 3; k++) { /* (the best of three) */
-            run_test(t, sFbo[0], &cpu, &gpu);
+            run_test(t, t >= T_SWPLAIN ? sFboT : sFbo[0], &cpu, &gpu);
             if (cpu < best[t][0]) {
                 best[t][0] = cpu;
                 best[t][1] = gpu;
@@ -387,6 +421,9 @@ void R36_Bench(void) {
         }
         R36_LogLine("bench: %-30s %7.1f us a draw on the processor, then %6.1f ms for the GPU to finish%s\n", kName[t], best[t][0], best[t][1],
                     t == T_BIG ? " (100 draws)" : " (2000 draws)");
+        if (t >= T_SWPLAIN) {
+            R36_LogLine("bench:   -> %.0f us on the processor for each going away and back (100 of them)\n", (best[t][0] - best[T_SAME][0]) * 20.0);
+        }
     }
     two_threads();
     /* (everything let go; the state as a new context has it, for the renderer) */
@@ -403,6 +440,9 @@ void R36_Bench(void) {
     b_glDepthFunc(GL_LESS);
     b_glViewport(0, 0, 960, 544);
     b_glDeleteFramebuffers(2, sFbo);
+    b_glDeleteFramebuffers(1, &sFboT);
+    b_glDeleteTextures(1, &sColT);
+    b_glDeleteTextures(1, &sDepT);
     b_glDeleteRenderbuffers(2, sDep);
     b_glDeleteTextures(2, sCol);
     b_glDeleteTextures(2, sTex);
