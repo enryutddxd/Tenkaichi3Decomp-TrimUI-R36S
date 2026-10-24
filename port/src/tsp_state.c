@@ -30,6 +30,13 @@ void R36_GameState(FILE *f) {
         fprintf(f, "  present thread: %u shown, %u dropped, %u waits\n", gR36Present[0] - pp[0], gR36Present[1] - pp[1], gR36Present[2] - pp[2]);
         memcpy(pp, gR36Present, sizeof(pp));
     }
+    {
+        extern int gVitaGpuAb;
+        static const char *kAb[3] = {"normal", "640x368", "effects off"};
+        if (gVitaGpuAb) {
+            fprintf(f, "  GPU A/B in these 10 s: %s\n", kAb[gR36ProfWindow % 3u]);
+        }
+    }
     extern int gVitaOptAb, gR36Opt;
     if (gVitaOptAb) {
         fprintf(f, "  OPT in these 10 s: %s\n", (gR36ProfWindow & 1) ? "off (A/B)" : "ON (A/B)");
