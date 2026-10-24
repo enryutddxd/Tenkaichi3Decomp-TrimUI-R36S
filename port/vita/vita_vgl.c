@@ -1194,8 +1194,13 @@ int gVglSafe2;           /* more of the same: 1 a fight's picture handed to the 
 extern GLboolean vglSplitScene(void);
 extern int vgl_bt3_split_on;
 extern unsigned vgl_bt3_splits;
+#ifdef PORT_TSP /* (the TrimUI: the picture handed over every 3 ms, see vglSplitScene in r36s_gl.c) */
+#define SPLIT_MS 3
+#define SPLIT_MAX 10
+#else
 #define SPLIT_MS 7
 #define SPLIT_MAX 4
+#endif
 static unsigned long long sSplitAt; /* the next part's end (0: none in this picture) */
 static int sSplitN;                  /* parts ended in this picture */
 static unsigned sSplitPics;          /* for the log: pictures drawn in parts */
@@ -1319,7 +1324,7 @@ int gVitaFxSweep;           /* the effects left out in turn, 60 pictures each, t
 int gVitaFxAb = 0;          /* (TrimUI test build) see frame_begin */
 int gVitaGlowHalf = 1;      /* (see glow_exec) */
 extern int gVitaAClear;
-int gVitaGpuAb = 0;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
+int gVitaGpuAb = 1;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
 int gVitaUbAb = 0;          /* (TrimUI test build) the uniform blocks' four ways in turn, 10 s each (r36s_gl.c gR36UbMode) */
 int gVitaOptAb = 0;         /* (TrimUI test build) the driver's ways of doing less (gR36Opt) off every other 10 s */
 #ifdef PORT_TSP /* (the TrimUI: the work targets' effects and the glow off by default: ~25 -> ~29.5 fps in a fight at 854 x 480, the
@@ -6737,13 +6742,9 @@ void GsGpu_FrameEnd(void) {
         if (gVitaGpuAb && !gVitaGsSkip) {
             extern volatile unsigned gR36ProfWindow;
             static int keepW, keepH;
-            extern int gVglSafe2;
+            extern int gR36Split;
             (void)keepW; (void)keepH;
-            if (gR36ProfWindow % 2u == 0) { /* (the additive groups: on, off) */
-                gVglSafe2 |= 8192;
-            } else {
-                gVglSafe2 &= ~8192;
-            }
+            gR36Split = gR36ProfWindow % 2u == 0; /* (the picture handed over every few ms: on, off) */
         }
         if (gVitaUbAb) {
             extern volatile unsigned gR36ProfWindow;

@@ -2211,7 +2211,22 @@ void *vglAllocFromScratch(size_t size) {
     return p;
 }
 /* (a picture is not handed to the chip in parts here: the renderer then reads the display through its own copies) */
-GLboolean vglSplitScene(void) { return GL_FALSE; }
+/* (vita_vgl.c, every few ms of a fight's picture) the picture so far handed to the GPU now (glFlush: the driver
+   renders what it has), so that a read of the picture later in it (the fog's depth, the ids' copy) waits only for
+   what came after: each such read made this thread wait ~0.8 ms and more for all the GPU had not drawn yet
+   (r36s_bench.c: "away+back, reading its colour"). gR36Split 0 (bt3.txt split=0): not. */
+int gR36Split = 1;
+unsigned gR36SplitN;
+GLboolean vglSplitScene(void) {
+    if (!gR36Split) {
+        return GL_FALSE;
+    }
+    ENTER_R(GL_FALSE);
+    p_glFlush();
+    gR36SplitN++;
+    LEAVE();
+    return GL_TRUE;
+}
 void vglBt3ContNext(void) { }
 void vglBt3Dirty(void) { }
 void vglSetupScratchMemory(GLboolean v, GLboolean f) { (void)v; (void)f; }

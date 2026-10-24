@@ -35,11 +35,10 @@ void R36_GameState(FILE *f) {
         extern unsigned gVitaGlowReuse;
         static unsigned pr;
         if (gVitaGpuAb) {
-            extern unsigned gVitaAg[3];
-            static unsigned pg[3];
-            fprintf(f, "  ADDITIVE GROUPS A/B in these 10 s: %s | groups %u, their draws %u, changes of state saved %u\n", gR36ProfWindow % 2u == 0 ? "ON" : "off",
-                    gVitaAg[0] - pg[0], gVitaAg[1] - pg[1], gVitaAg[2] - pg[2]);
-            memcpy(pg, gVitaAg, sizeof(pg));
+            extern unsigned gR36SplitN;
+            static unsigned ps;
+            fprintf(f, "  SPLIT A/B in these 10 s: %s | splits %u\n", gR36ProfWindow % 2u == 0 ? "ON" : "off", gR36SplitN - ps);
+            ps = gR36SplitN;
         }
         pr = gVitaGlowReuse;
     }
