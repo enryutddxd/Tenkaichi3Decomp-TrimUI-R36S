@@ -443,6 +443,22 @@ typedef struct Variant { GLuint prog; GLint test, tex, u[6]; int bk; /* (R36S: a
    the flags differing only by 16/64/1024 (the GS's own vertex shader variants); within one kind */
 unsigned gVitaPsw[4];
 static int sPswKind = -1, sPswFlags = -1;
+unsigned gVitaPswPair[64][2]; /* (for the log) the commonest changes: (from kind << 12 | flags) << 16 | (to ...), count */
+static int sPswFull = -1;
+static inline void psw_pair(int full) {
+    if (sPswFull >= 0) {
+        unsigned key = (unsigned)sPswFull << 16 | (unsigned)full, h = (key * 2654435761u) >> 26, j;
+        for (j = 0; j < 64; j++) {
+            unsigned q = (h + j) & 63;
+            if (gVitaPswPair[q][0] == key || gVitaPswPair[q][1] == 0) {
+                gVitaPswPair[q][0] = key;
+                gVitaPswPair[q][1]++;
+                break;
+            }
+        }
+    }
+    sPswFull = full;
+}
 static inline void psw_note(int kind, int flags) {
     int k = kind == 0 ? 0 : 1;
     gVitaPsw[0]++;
@@ -3202,6 +3218,7 @@ static void flush_impl(const FlushIn *in) {
                 glUseProgram(var->prog);
                 sGlc.prog = var->prog;
                 psw_note(in->kind == 0 ? 0 : 1, vf);
+                psw_pair(in->kind << 12 | (vf & 0xFFF));
             }
             if (fm) {
                 int tp = lin | s->wrapS << 1 | s->wrapT << 2;
@@ -9513,6 +9530,7 @@ static void dp_draw_items(DpItem *items, int n, int prof) {
                 glUseProgram(var->prog);
                 sGlc.prog = var->prog;
                 psw_note(1, vflags);
+                psw_pair((var->bk ? kind + 2 : kind) << 12 | (vflags & 0xFFF));
             }
             if (fm) {
                 int tp = s->linear | s->wrapS << 1 | s->wrapT << 2;

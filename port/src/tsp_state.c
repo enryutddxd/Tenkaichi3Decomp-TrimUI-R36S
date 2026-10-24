@@ -58,6 +58,27 @@ void R36_GameState(FILE *f) {
         fprintf(f, "  program changes: %u; GS <-> parts, same pixel shader %u, differing only by 16/64/1024 %u; within one side %u\n",
                 gVitaPsw[0] - pw[0], gVitaPsw[1] - pw[1], gVitaPsw[2] - pw[2], gVitaPsw[3] - pw[3]);
         memcpy(pw, gVitaPsw, sizeof(pw));
+        {   /* the commonest changes (kind:flags -> kind:flags), then the table emptied */
+            extern unsigned gVitaPswPair[64][2];
+            int j, t;
+            fprintf(f, "  program changes, commonest (kind:flags>kind:flags count):");
+            for (t = 0; t < 10; t++) {
+                int best = -1;
+                for (j = 0; j < 64; j++) {
+                    if (gVitaPswPair[j][1] != 0 && (best < 0 || gVitaPswPair[j][1] > gVitaPswPair[best][1])) {
+                        best = j;
+                    }
+                }
+                if (best < 0) {
+                    break;
+                }
+                fprintf(f, " %u:%x>%u:%x %u;", gVitaPswPair[best][0] >> 28, (gVitaPswPair[best][0] >> 16) & 0xFFF, (gVitaPswPair[best][0] >> 12) & 15,
+                        gVitaPswPair[best][0] & 0xFFF, gVitaPswPair[best][1]);
+                gVitaPswPair[best][1] = 0x80000000u; /* (printed) */
+            }
+            fprintf(f, "\n");
+            memset(gVitaPswPair, 0, sizeof(gVitaPswPair));
+        }
     }
     extern int gVitaOptAb, gR36Opt;
     if (gVitaOptAb) {
