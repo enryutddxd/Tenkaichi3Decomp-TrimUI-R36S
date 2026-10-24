@@ -35,10 +35,8 @@ void R36_GameState(FILE *f) {
         extern unsigned gVitaGlowReuse;
         static unsigned pr;
         if (gVitaGpuAb) {
-            extern unsigned gR36SplitN;
-            static unsigned ps;
-            fprintf(f, "  SPLIT A/B in these 10 s: %s | splits %u\n", gR36ProfWindow % 2u == 0 ? "ON" : "off", gR36SplitN - ps);
-            ps = gR36SplitN;
+            static const char *kAb[3] = {"as by default", "no table passes/fog", "no outline"};
+            fprintf(f, "  FX A/B in these 10 s: %s\n", kAb[gR36ProfWindow % 3u]);
         }
         pr = gVitaGlowReuse;
     }
