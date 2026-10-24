@@ -1568,7 +1568,7 @@ static void rt_fbegin_put(void);
 #endif
 static void glow_frame(void);
 static void fx_early(void);
-int gVitaFxRot = 1, gVitaFxRotAb = 1; /* (TrimUI) the ids/fog targets in three sets taken in turn (bt3.txt fxrot, fxrotab) */
+int gVitaFxRot = 1, gVitaFxRotAb = 0; /* (TrimUI) the ids/fog targets in three sets taken in turn (bt3.txt fxrot, fxrotab) */
 static void frame_begin_gl(void) { /* (the thread that makes the GL calls) */
     glow_frame();
     /* (the ids' copy and the fog byte are this picture's only once made in it: a table pass before them, or in a
@@ -6319,7 +6319,17 @@ static void xf_marker(uint32_t arg) {
 /* (the thread that draws) a table pass */
 static void tbl_exec(const uint8_t *p) {
     const TblOp *op = (const TblOp *)(const void *)p;
-    int k = op->src == 0 ? (sFogOk ? 4 : 2) : 1;
+    int k;
+#ifdef PORT_R36S
+    if (op->src == 0 && !sFogOk && sFogFbo != 0 && sFxProg[3] != 0) {
+        /* (no fog byte made in this picture: made here from the depth as it is now. The pass that reads the depth
+           itself (k 2) drew the night stages black on the TrimUI) */
+        fog_run(sDepthTex, op->zmax);
+        sHadFog = 1;
+        sFogZmax = op->zmax;
+    }
+#endif
+    k = op->src == 0 ? (sFogOk ? 4 : 2) : 1;
     target_set(op->d.target);
     if (op->src == 0 && !sFogOk) {
         extern int gVglSafe2;
@@ -6413,7 +6423,9 @@ static int tbl_intercept(int type, int ctx) {
         int mainPage = gGsMainFbp >= 0 ? tbp / 32 == (uint32_t)gGsMainFbp : (tbp / 32 == 0 || tbp / 32 == 0x70);
         if (tpsm == 0x1B) {
             sDepthByteIsFog = 1; /* GfxDepthFog_Draw */
-            if (!run && sFogFbo != 0 && !(gVglSafe2 & 4096)) { /* its 16 strips: one copy of the fog byte */
+            if (run != 1 && sFogFbo != 0 && !(gVglSafe2 & 4096)) { /* its 16 strips: one copy of the fog byte (right after
+                                                                   another pass's strips too: the night stages' fog
+                                                                   follows a table pass, and was never worked out) */
                 float zmax = ((gGs.zbuf[ctx] >> 24) & 15) == 0 ? 4294967295.0f : ((gGs.zbuf[ctx] >> 24) & 15) == 1 ? 16777215.0f : 65535.0f;
                 flush();
                 if (sRtOn) {
@@ -6423,9 +6435,9 @@ static int tbl_intercept(int type, int ctx) {
                     fog_exec((const uint8_t *)&zmax);
                 }
             }
-            sTblRun = 1;
+            sTblRun = 1; /* (a strip of the fog byte) */
         } else if (tpsm == 0 && mainPage && (tbp & 0x1F) == 0) {
-            if ((sDepthByteIsFog || !run) && !(gVitaFxMask & 16)) { /* GfxPost_CopyAlphaToDepth (its 16 strips: one copy) */
+            if ((sDepthByteIsFog || run != 2) && !(gVitaFxMask & 16)) { /* GfxPost_CopyAlphaToDepth (its 16 strips: one copy) */
                 flush();
                 if (sRtOn) {
                     rt_reserve(RT_IDS, 16);
@@ -6435,7 +6447,7 @@ static int tbl_intercept(int type, int ctx) {
                 }
             }
             sDepthByteIsFog = 0;
-            sTblRun = 1;
+            sTblRun = 2; /* (a strip of the ids' copy) */
         }
         return 0;
     }
@@ -6455,8 +6467,8 @@ static int tbl_intercept(int type, int ctx) {
         return 1; /* the see-through tint with nothing seen through: every entry it would draw is transparent */
     }
     regs[0] = fr; regs[1] = gGs.alpha[ctx]; regs[2] = gGs.test[ctx]; regs[3] = t0; regs[4] = gGs.scissor[ctx]; regs[5] = (uint64_t)sDepthByteIsFog;
-    if (run && memcmp(regs, sTblRegs, sizeof(regs)) == 0) {
-        sTblRun = 1;
+    if (run == 3 && memcmp(regs, sTblRegs, sizeof(regs)) == 0) {
+        sTblRun = 3;
         return 1; /* the next strip of the same pass */
     }
     {
@@ -6500,7 +6512,7 @@ static int tbl_intercept(int type, int ctx) {
             tbl_exec((const uint8_t *)op);
         }
         memcpy(sTblRegs, regs, sizeof(regs));
-        sTblRun = 1;
+        sTblRun = 3; /* (a strip of a table pass) */
         gVitaWt[5]++;
         gVitaWt[6] += sDepthByteIsFog != 0;
         tbl_count(cbp, 1);
