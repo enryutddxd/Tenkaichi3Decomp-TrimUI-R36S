@@ -66,6 +66,9 @@ extern void R36_LogLine(const char *fmt, ...);
     X(void, glVertexAttrib4f, (GLuint, GLfloat, GLfloat, GLfloat, GLfloat)) X(void, glViewport, (GLint, GLint, GLsizei, GLsizei)) \
     X(void, glBindVertexArray, (GLuint)) X(void *, glMapBufferRange, (GLenum, GLintptr, GLsizeiptr, GLbitfield)) X(GLboolean, glUnmapBuffer, (GLenum)) \
     X(void, glDrawElementsBaseVertex, (GLenum, GLsizei, GLenum, const void *, GLint)) \
+    X(void, glBindBufferRange, (GLenum, GLuint, GLuint, GLintptr, GLsizeiptr)) X(GLuint, glGetUniformBlockIndex, (GLuint, const GLchar *)) \
+    X(void, glUniformBlockBinding, (GLuint, GLuint, GLuint)) X(void, glGetActiveUniformsiv, (GLuint, GLsizei, const GLuint *, GLenum, GLint *)) \
+    X(void, glGetActiveUniformBlockiv, (GLuint, GLuint, GLenum, GLint *)) X(void, glGetAttachedShaders, (GLuint, GLsizei, GLsizei *, GLuint *)) \
     X(GLsync, glFenceSync, (GLenum, GLbitfield)) X(GLenum, glClientWaitSync, (GLsync, GLbitfield, GLuint64)) X(void, glDeleteSync, (GLsync)) \
     X(void, glBufferStorageEXT, (GLenum, GLsizeiptr, const void *, GLbitfield))
 #define X(r, n, p) static r(*p_##n) p;
@@ -483,8 +486,25 @@ unsigned vgl_bt3_frag_patches, vgl_bt3_frag_hits, vgl_bt3_frag_us, vgl_bt3_layou
 uint32_t vsync_interval;
 static void (*sDisplayCb)(void *);
 
-/* programs: where their r36_flip and U are */
-typedef struct Prog { GLint flip, u; float flipVal; uint32_t usize; } Prog;
+/* programs: where their r36_flip and U are.
+   (TrimUI) The uniforms of the renderer's shaders in uniform blocks: on the PowerVR driver each glUniform* before a
+   draw cost ~30 us (r36s_bench.c), a uniform buffer's range bound ~6 us. The Cg shaders' uniforms (not their
+   samplers) go into a block of each stage (R36V, binding 0; R36F, binding 1: ub_block); glUniform* writes a copy
+   here (a location of ours, UB_LOC), and before a draw a changed copy is put into the stream and its range bound.
+   R36_UBO=0 (bt3.txt ubo=0): as before. */
+#define UB_LOC 0x100000
+#define UB_MAXM 32
+typedef struct UMem { char name[32]; uint8_t blk; uint16_t off, stride, n; } UMem;
+typedef struct Prog {
+    GLint flip, u; float flipVal; uint32_t usize;
+    uint32_t bsize[2];      /* the blocks' sizes (0: none) */
+    uint8_t *shadow[2];     /* their contents as set */
+    uint8_t dirty[2];
+    long boff[2];           /* where the stream has them (for sStreamGen) */
+    unsigned bgen[2];
+    int nm;
+    UMem m[UB_MAXM];
+} Prog;
 static Prog *sProg;
 static int sProgCap;
 static GLuint sCurProg;
@@ -498,7 +518,7 @@ static Prog *prog_of(GLuint p) {
     return &sProg[p];
 }
 /* shaders: which are Cg, and their GLSL (for the log when one does not compile) */
-typedef struct Shd { int cg, vertex; char *glsl; } Shd;
+typedef struct Shd { int cg, vertex, blocked; char *glsl, *plain; } Shd;
 static Shd *sShd;
 static int sShdCap;
 static Shd *shd_of(GLuint s) {
@@ -685,9 +705,9 @@ int R36_VideoInit(void) {
         p_glGetIntegerv(GL_MAX_VARYING_VECTORS, &c);
         R36_LogLine("r36: vertex uniform vectors %d, texture size %d, varyings %d\n", a, b, c);
     }
-    {   /* (TrimUI test build) the driver's costs measured once at start, into the log (r36s_bench.c); R36_BENCH=0: not */
+    {   /* (TrimUI) the driver's costs measured once at start, into the log (r36s_bench.c): R36_BENCH=1 (bt3.txt bench=1) */
         const char *e = getenv("R36_BENCH");
-        if (e == NULL || atoi(e) != 0) {
+        if (e != NULL && atoi(e) != 0) {
             extern void R36_Bench(void);
             R36_Bench();
         }
@@ -1033,6 +1053,69 @@ GLuint r36_glCreateShader(GLenum type) {
     LEAVE();
     return s;
 }
+static int sUbOff = -1; /* R36_UBO=0 */
+/* the GLSL with its uniforms (but samplers) moved into one block: NULL when there are none (or R36_UBO=0) */
+static char *ub_block(const char *g, int vertex) {
+    size_t n = strlen(g);
+    char *out = (char *)malloc(n + 256), *mem = (char *)malloc(n + 64), *o = out, *m = mem;
+    const char *line = g, *firstAt = NULL;
+    int count = 0;
+    if (sUbOff < 0) {
+        const char *e = getenv("R36_UBO");
+        sUbOff = e != NULL && atoi(e) == 0;
+    }
+    if (sUbOff) {
+        free(out);
+        free(mem);
+        return NULL;
+    }
+    *m = 0;
+    while (*line) {
+        const char *end = strchr(line, '\n'), *t = line, *semi;
+        size_t len = end != NULL ? (size_t)(end - line) + 1 : strlen(line);
+        while (*t == ' ' || *t == '\t') {
+            t++;
+        }
+        semi = (const char *)memchr(t, ';', len - (size_t)(t - line));
+        if (strncmp(t, "uniform ", 8) == 0 && semi != NULL && !memchr(t, '{', len - (size_t)(t - line)) &&
+            !memchr(t, '=', (size_t)(semi - t)) && !memchr(t, '(', (size_t)(semi - t))) {
+            const char *a = t + 8;
+            int sampler = 0;
+            for (const char *q = a; q < semi; q++) {
+                if (strncmp(q, "sampler", 7) == 0) {
+                    sampler = 1;
+                }
+            }
+            if (!sampler) {
+                if (firstAt == NULL) {
+                    firstAt = line;
+                    o += sprintf(o, "@@BLOCK@@\n");
+                }
+                m += sprintf(m, "    %.*s;\n", (int)(semi - a), a);
+                count++;
+                line += len;
+                continue;
+            }
+        }
+        memcpy(o, line, len);
+        o += len;
+        line += len;
+    }
+    *o = 0;
+    if (count == 0) {
+        free(out);
+        free(mem);
+        return NULL;
+    }
+    {
+        size_t need = strlen(out) + strlen(mem) + 128;
+        char *r = (char *)malloc(need), *at = strstr(out, "@@BLOCK@@\n");
+        snprintf(r, need, "%.*slayout(std140) uniform %s {\n%s};\n%s", (int)(at - out), out, vertex ? "R36V" : "R36F", mem, at + 10);
+        free(out);
+        free(mem);
+        return r;
+    }
+}
 void r36_glShaderSource(GLuint s, GLsizei count, const GLchar *const *str, const GLint *len) {
     ENTER();
     Shd *d = shd_of(s);
@@ -1060,10 +1143,14 @@ void r36_glShaderSource(GLuint s, GLsizei count, const GLchar *const *str, const
             R36_LogLine("r36 gl: a Cg shader not translated: %s\n%s\n", err, all);
             p_glShaderSource(s, 1, &b, NULL);
         } else {
-            const char *g = glsl;
+            char *bl = ub_block(glsl, d->vertex);
+            const char *g = bl != NULL ? bl : glsl;
             p_glShaderSource(s, 1, &g, NULL);
             free(d->glsl);
-            d->glsl = glsl;
+            free(d->plain);
+            d->plain = bl != NULL ? glsl : NULL;
+            d->glsl = bl != NULL ? bl : glsl;
+            d->blocked = bl != NULL;
         }
         free(all);
     }
@@ -1092,13 +1179,143 @@ void vglGetShaderBinary(GLuint index, GLsizei bufSize, GLsizei *length, void *bi
         *length = 0;
     }
 }
+/* the program's blocks: bound to 0 and 1, their sizes, their members */
+static void ub_setup(GLuint p, Prog *pr) {
+    static const char *kB[2] = {"R36V", "R36F"};
+    GLuint bi[2];
+    GLint n = 0, b;
+    if (p_glGetUniformBlockIndex == NULL || p_glBindBufferRange == NULL) {
+        return;
+    }
+    for (b = 0; b < 2; b++) {
+        GLint sz = 0;
+        bi[b] = p_glGetUniformBlockIndex(p, kB[b]);
+        if (bi[b] == GL_INVALID_INDEX) {
+            continue;
+        }
+        p_glUniformBlockBinding(p, bi[b], (GLuint)b);
+        p_glGetActiveUniformBlockiv(p, bi[b], GL_UNIFORM_BLOCK_DATA_SIZE, &sz);
+        pr->bsize[b] = (uint32_t)sz;
+        pr->shadow[b] = (uint8_t *)calloc(1, (size_t)sz + 16);
+        pr->dirty[b] = 1;
+    }
+    p_glGetProgramiv(p, GL_ACTIVE_UNIFORMS, &n);
+    for (GLint i = 0; i < n && pr->nm < UB_MAXM; i++) {
+        char name[64];
+        GLint size = 0, blk = -1, off = 0, st = 0;
+        GLenum type = 0;
+        GLuint ui = (GLuint)i;
+        char *br;
+        p_glGetActiveUniform(p, ui, sizeof(name), NULL, &size, &type, name);
+        p_glGetActiveUniformsiv(p, 1, &ui, GL_UNIFORM_BLOCK_INDEX, &blk);
+        if (blk < 0) {
+            continue;
+        }
+        p_glGetActiveUniformsiv(p, 1, &ui, GL_UNIFORM_OFFSET, &off);
+        p_glGetActiveUniformsiv(p, 1, &ui, GL_UNIFORM_ARRAY_STRIDE, &st);
+        if ((br = strchr(name, '[')) != NULL) {
+            *br = 0;
+        }
+        UMem *m = &pr->m[pr->nm++];
+        snprintf(m->name, sizeof(m->name), "%s", name);
+        m->blk = (uint8_t)((GLuint)blk == bi[1] && pr->bsize[1] != 0 ? 1 : 0);
+        m->off = (uint16_t)off;
+        m->stride = (uint16_t)st;
+        m->n = (uint16_t)(size > 0 ? size : 1);
+    }
+}
+/* a uniform's location: ours (UB_LOC + member << 12 + element) for a block's member */
+static GLint ub_loc(GLuint p, const char *name) {
+    Prog *pr = (int)p < sProgCap ? &sProg[p] : NULL;
+    if (pr != NULL && pr->nm > 0) {
+        char base[64];
+        const char *br = strchr(name, '[');
+        int el = br != NULL ? atoi(br + 1) : 0, k;
+        snprintf(base, sizeof(base), "%.*s", br != NULL ? (int)(br - name) : (int)strlen(name), name);
+        for (k = 0; k < pr->nm; k++) {
+            if (strcmp(pr->m[k].name, base) == 0) {
+                return el < pr->m[k].n ? UB_LOC + (k << 12) + el : -1;
+            }
+        }
+    }
+    return p_glGetUniformLocation(p, name);
+}
+GLint r36_glGetUniformLocation(GLuint p, const GLchar *name) {
+    ENTER_R(-1);
+    GLint r = ub_loc(p, name);
+    LEAVE();
+    return r;
+}
+/* a value into the current program's copy: 1 when the location is ours */
+static int ub_set(GLint loc, const void *v, uint32_t bytes, int count) {
+    Prog *pr;
+    UMem *m;
+    int el, i;
+    if (loc < UB_LOC) {
+        return 0;
+    }
+    pr = (int)sCurProg < sProgCap ? &sProg[sCurProg] : NULL;
+    if (pr == NULL || ((loc - UB_LOC) >> 12) >= pr->nm) {
+        return 1;
+    }
+    m = &pr->m[(loc - UB_LOC) >> 12];
+    el = (loc - UB_LOC) & 0xFFF;
+    for (i = 0; i < count && el + i < m->n; i++) {
+        uint32_t at = m->off + (uint32_t)(el + i) * m->stride;
+        if (at + bytes <= pr->bsize[m->blk]) {
+            memcpy(pr->shadow[m->blk] + at, (const uint8_t *)v + (size_t)i * bytes, bytes);
+        }
+    }
+    pr->dirty[m->blk] = 1;
+    return 1;
+}
+void r36_glUniform1i(GLint loc, GLint v) { ENTER(); if (!ub_set(loc, &v, 4, 1)) { p_glUniform1i(loc, v); sEv |= 32; } LEAVE(); }
+void r36_glUniform1f(GLint loc, GLfloat v) { ENTER(); if (!ub_set(loc, &v, 4, 1)) { p_glUniform1f(loc, v); sEv |= 32; } LEAVE(); }
+void r36_glUniform4f(GLint loc, GLfloat a, GLfloat b, GLfloat c, GLfloat d) {
+    ENTER();
+    GLfloat v[4] = {a, b, c, d};
+    if (!ub_set(loc, v, 16, 1)) {
+        p_glUniform4f(loc, a, b, c, d);
+        sEv |= 32;
+    }
+    LEAVE();
+}
+void r36_glUniform4fv(GLint loc, GLsizei count, const GLfloat *v) { ENTER(); if (!ub_set(loc, v, 16, count)) { p_glUniform4fv(loc, count, v); sEv |= 32; } LEAVE(); }
+static void prog_free(Prog *pr) {
+    free(pr->shadow[0]);
+    free(pr->shadow[1]);
+}
 void r36_glLinkProgram(GLuint p) {
     ENTER();
     GLint ok = 0, n = 0;
     Prog *pr;
     p_glLinkProgram(p);
     p_glGetProgramiv(p, GL_LINK_STATUS, &ok);
+    if (!ok && p_glGetAttachedShaders != NULL) { /* (the blocks the reason, say a name in both stages: the shaders as they were) */
+        GLuint sh[4];
+        GLsizei ns = 0, i, redo = 0;
+        p_glGetAttachedShaders(p, 4, &ns, sh);
+        for (i = 0; i < ns; i++) {
+            Shd *d = shd_of(sh[i]);
+            if (d->blocked && d->plain != NULL) {
+                const char *g = d->plain;
+                p_glShaderSource(sh[i], 1, &g, NULL);
+                p_glCompileShader(sh[i]);
+                free(d->glsl);
+                d->glsl = d->plain;
+                d->plain = NULL;
+                d->blocked = 0;
+                redo = 1;
+            }
+        }
+        if (redo) {
+            R36_LogLine("r36 gl: program %u linked without uniform blocks\n", (unsigned)p);
+            p_glLinkProgram(p);
+            p_glGetProgramiv(p, GL_LINK_STATUS, &ok);
+        }
+    }
     pr = prog_of(p);
+    prog_free(pr);
     memset(pr, 0, sizeof(*pr));
     if (!ok) {
         char log[600];
@@ -1109,8 +1326,9 @@ void r36_glLinkProgram(GLuint p) {
         LEAVE();
         return;
     }
-    pr->flip = p_glGetUniformLocation(p, "r36_flip");
-    pr->u = p_glGetUniformLocation(p, "U");
+    ub_setup(p, pr);
+    pr->flip = ub_loc(p, "r36_flip");
+    pr->u = ub_loc(p, "U");
     pr->flipVal = 0.0f; /* (set before its first draw) */
     p_glGetProgramiv(p, GL_ACTIVE_UNIFORMS, &n);
     for (GLint i = 0; i < n; i++) {
@@ -1120,6 +1338,12 @@ void r36_glLinkProgram(GLuint p) {
         p_glGetActiveUniform(p, (GLuint)i, sizeof(name), NULL, &size, &type, name);
         if (strcmp(name, "U") == 0 || strcmp(name, "U[0]") == 0) {
             pr->usize = (uint32_t)size * 16u;
+        }
+    }
+    if ((pr->bsize[0] | pr->bsize[1]) != 0) {
+        static int logged;
+        if (logged++ < 3) {
+            R36_LogLine("r36 gl: program %u: uniform blocks of %u and %u bytes, %d members\n", (unsigned)p, pr->bsize[0], pr->bsize[1], pr->nm);
         }
     }
     LEAVE();
@@ -1311,6 +1535,7 @@ static uint8_t *sStreamMap;   /* (persistent mapping, or NULL: mapped per piece)
 static int sStreamOff = -1;   /* -1 not tried yet, 1 off */
 static unsigned sStreamPart, sStreamAt;
 static GLsync sStreamFence[3];
+static unsigned sStreamGen = 1; /* (counts the parts begun: what was put in the stream before may be written over) */
 static void stream_init(void) {
     const char *e = getenv("R36_STREAM");
     sStreamOff = e != NULL && atoi(e) == 0;
@@ -1344,6 +1569,7 @@ static void stream_next(void) {
     sStreamFence[sStreamPart] = p_glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     sStreamPart = (sStreamPart + 1) % 3;
     sStreamAt = 0;
+    sStreamGen++;
     if (sStreamFence[sStreamPart] != NULL) {
         p_glClientWaitSync(sStreamFence[sStreamPart], GL_SYNC_FLUSH_COMMANDS_BIT, 100000000ull);
         p_glDeleteSync(sStreamFence[sStreamPart]);
@@ -1353,14 +1579,23 @@ static void stream_next(void) {
 /* copies n bytes into the stream: its offset in the stream buffer (R36_StreamBuf), or -1 (no room: the caller's
    own way) */
 GLuint R36_StreamBuf(void) { return sStreamBuf; }
+static long stream_put(const void *data, size_t n, unsigned align);
 long R36_Stream(const void *data, size_t n) {
     long at;
     ENTER_R(-1);
+    at = stream_put(data, n, 16);
+    LEAVE();
+    return at;
+}
+static long stream_put(const void *data, size_t n, unsigned align) {
+    long at;
     if (sStreamOff < 0) {
         stream_init();
     }
+    if (sStreamOff == 0) {
+        sStreamAt = (sStreamAt + align - 1u) / align * align;
+    }
     if (sStreamOff != 0 || n == 0 || sStreamAt + n + 16 > STREAM_PART) {
-        LEAVE();
         return -1;
     }
     at = (long)(sStreamPart * STREAM_PART + sStreamAt);
@@ -1380,8 +1615,53 @@ long R36_Stream(const void *data, size_t n) {
     }
     sStreamAt = (sStreamAt + (unsigned)n + 15u) & ~15u;
     gR36Up[2] += (unsigned)n;
-    LEAVE();
     return at;
+}
+/* (before a draw) the current program's blocks: a changed copy into the stream, its range bound */
+static struct { long off; uint32_t size; } sUbBound[2] = {{-1, 0}, {-1, 0}};
+static GLuint sUbFb[2];
+static unsigned sUbAlign;
+unsigned gR36Ub[3]; /* (for the log) blocks put into the stream, ranges bound, bytes */
+static void ub_bind(Prog *p) {
+    int b;
+    if (sUbAlign == 0) {
+        GLint a = 0;
+        p_glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &a);
+        sUbAlign = a > 16 ? (unsigned)a : 16u;
+    }
+    for (b = 0; b < 2; b++) {
+        uint32_t sz = p->bsize[b];
+        if (sz == 0) {
+            continue;
+        }
+        if (p->dirty[b] || p->bgen[b] != sStreamGen || p->boff[b] < 0) {
+            long at = stream_put(p->shadow[b], sz, sUbAlign);
+            p->dirty[b] = 0;
+            p->bgen[b] = sStreamGen;
+            p->boff[b] = at;
+            gR36Ub[0]++;
+            gR36Ub[2] += sz;
+            if (at < 0) { /* (no room: a buffer of its own, given the copy) */
+                if (sUbFb[b] == 0) {
+                    p_glGenBuffers(1, &sUbFb[b]);
+                }
+                p_glBindBuffer(GL_UNIFORM_BUFFER, sUbFb[b]);
+                p_glBufferData(GL_UNIFORM_BUFFER, sz, p->shadow[b], GL_STREAM_DRAW);
+                p_glBindBuffer(GL_UNIFORM_BUFFER, 0);
+                p_glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)b, sUbFb[b], 0, sz);
+                sUbBound[b].off = -1;
+                p->dirty[b] = 1; /* (next time into the stream again) */
+                gR36Ub[1]++;
+                continue;
+            }
+        }
+        if (sUbBound[b].off != p->boff[b] || sUbBound[b].size != sz) {
+            p_glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)b, sStreamBuf, p->boff[b], sz);
+            sUbBound[b].off = p->boff[b];
+            sUbBound[b].size = sz;
+            gR36Ub[1]++;
+        }
+    }
 }
 GLuint R36_ElemBuf(void) { return sElemBuf; }
 /* (as R36_Stream) at a multiple of 32 bytes: a vertex's place in the stream as a whole number of vertices */
@@ -1469,8 +1749,13 @@ static void pre_draw(void) {
         Prog *p = &sProg[sCurProg];
         float f = sOnDisp ? -1.0f : 1.0f;
         if (p->flip >= 0 && p->flipVal != f) {
-            p_glUniform1f(p->flip, f);
+            if (!ub_set(p->flip, &f, 4, 1)) {
+                p_glUniform1f(p->flip, f);
+            }
             p->flipVal = f;
+        }
+        if ((p->bsize[0] | p->bsize[1]) != 0) {
+            ub_bind(p);
         }
     }
 }
@@ -1574,11 +1859,13 @@ void vglFastDraw(GLenum type, uint32_t offset, uint32_t count, const void *vunif
     ENTER();
     site_note((uintptr_t)__builtin_return_address(0));
     Prog *p = (int)sCurProg < sProgCap ? &sProg[sCurProg] : NULL;
-    pre_draw();
     if (p != NULL && p->u >= 0) {
-        p_glUniform4fv(p->u, (GLsizei)(size / 16u), (const GLfloat *)vunif);
+        if (!ub_set(p->u, vunif, 16, (int)(size / 16u))) {
+            p_glUniform4fv(p->u, (GLsizei)(size / 16u), (const GLfloat *)vunif);
+        }
         gR36Chg[4] += size;
     }
+    pre_draw();
     r_bind(GL_ELEMENT_ARRAY_BUFFER, sElemBuf);
     { unsigned long long dt0_ = draw_t0(); p_glDrawElements(GL_TRIANGLES, (GLsizei)count, type, (const void *)(uintptr_t)offset); draw_done(dt0_); }
     LEAVE();
@@ -1587,11 +1874,13 @@ void vglFastDrawPtr(GLenum type, const void *idx, uint32_t count, const void *vu
     ENTER();
     site_note((uintptr_t)__builtin_return_address(0));
     Prog *p = (int)sCurProg < sProgCap ? &sProg[sCurProg] : NULL;
-    pre_draw();
     if (p != NULL && p->u >= 0) {
-        p_glUniform4fv(p->u, (GLsizei)(size / 16u), (const GLfloat *)vunif);
+        if (!ub_set(p->u, vunif, 16, (int)(size / 16u))) {
+            p_glUniform4fv(p->u, (GLsizei)(size / 16u), (const GLfloat *)vunif);
+        }
         gR36Chg[4] += size;
     }
+    pre_draw();
     {   /* (the indices into the stream, else from main memory; the renderer's own put back at the next draw that needs it) */
         long at = R36_Stream(idx, (size_t)count * (type == GL_UNSIGNED_INT ? 4u : type == GL_UNSIGNED_BYTE ? 1u : 2u));
         if (at >= 0) {
@@ -1849,14 +2138,9 @@ R36_GL_PASS_V(glGetShaderInfoLog, (GLuint shader, GLsizei bufSize, GLsizei *leng
 R36_GL_PASS_V(glGetShaderiv, (GLuint shader, GLenum pname, GLint *params), (shader, pname, params))
 R36_GL_PASS_V(glGetProgramiv, (GLuint program, GLenum pname, GLint *params), (program, pname, params))
 R36_GL_PASS_V(glGetProgramInfoLog, (GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog), (program, bufSize, length, infoLog))
-R36_GL_PASS(GLint, glGetUniformLocation, (GLuint program, const GLchar *name), (program, name))
 R36_GL_PASS_V(glStencilFunc, (GLenum func, GLint ref, GLuint mask), (func, ref, mask))
 R36_GL_PASS_V(glStencilMask, (GLuint mask), (mask))
 R36_GL_PASS_V(glStencilOp, (GLenum fail, GLenum zfail, GLenum zpass), (fail, zfail, zpass))
-R36_GL_PASS_V(glUniform1i, (GLint location, GLint v0), (location, v0))
-R36_GL_PASS_V(glUniform1f, (GLint location, GLfloat v0), (location, v0))
-R36_GL_PASS_V(glUniform4f, (GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3), (location, v0, v1, v2, v3))
-R36_GL_PASS_V(glUniform4fv, (GLint location, GLsizei count, const GLfloat *value), (location, count, value))
 R36_GL_PASS_V(glGenBuffers, (GLsizei n, GLuint *buffers), (n, buffers))
 R36_GL_PASS(GLenum, glGetError, (void), ())
 R36_GL_PASS(GLenum, glCheckFramebufferStatus, (GLenum target), (target))
