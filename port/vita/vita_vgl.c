@@ -9592,6 +9592,16 @@ static int rt_put_dp(void) {
     d->uf = uf;
     memcpy(u, sDpU, uf * 4u);
     for (i = 0; i < n; i++) {
+#ifdef PORT_R36S
+        {   /* (the range of the vertices it reaches, here on the drawing thread: the render thread's copy worked it out
+               every picture; kept for the parts' own index lists, worked out again for indices of this picture's) */
+            DpGroup *og = (DpGroup *)(uintptr_t)sDpItem[i].g;
+            if (og->iptr != NULL) {
+                og->rngN = 0xFFFFFFFFu;
+            }
+            dpb_range(og);
+        }
+#endif
         g[i] = *sDpItem[i].g;
         it[i] = sDpItem[i];
         it[i].g = &g[i];

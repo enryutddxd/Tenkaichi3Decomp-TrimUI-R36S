@@ -1490,6 +1490,11 @@ void r36_glBindBuffer(GLenum target, GLuint b) {
         sArrayBuf = b;
     } else if (target == GL_ELEMENT_ARRAY_BUFFER) {
         sElemBuf = b;
+        if (gR36Opt) { /* (bound at the draw that uses it: every draw binds the one it needs; the renderer's binds
+                          of 0 between draws were two calls into the driver a run) */
+            LEAVE();
+            return;
+        }
     }
     r_bind(target, b);
     LEAVE();
@@ -2118,7 +2123,9 @@ int R36_DrawElementsBase(GLenum mode, GLsizei count, GLenum type, long off, GLin
     pre_draw();
     r_bind(GL_ELEMENT_ARRAY_BUFFER, sStreamBuf);
     { unsigned long long dt0_ = draw_t0(); p_glDrawElementsBaseVertex(mode, count, type, (const void *)(uintptr_t)off, base); draw_done(dt0_); }
-    r_bind(GL_ELEMENT_ARRAY_BUFFER, sElemBuf);
+    if (!gR36Opt) {
+        r_bind(GL_ELEMENT_ARRAY_BUFFER, sElemBuf);
+    }
     LEAVE();
     return 1;
 }
