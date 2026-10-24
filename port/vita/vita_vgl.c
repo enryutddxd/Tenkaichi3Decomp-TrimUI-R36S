@@ -6132,7 +6132,7 @@ static void fx_quad(void) {
 /* (TrimUI) the ids' copy and the fog byte from the picture before, made at the picture's start: the picture's
    scene is not split twice in its middle to read its alpha and depth (each split ~1.5 ms of the driver's waiting).
    The passes' results are one picture late. bt3.txt fxprev. */
-int gVitaFxPrev = 0, gVitaFxPrevAb = 1;
+int gVitaFxPrev = 1, gVitaFxPrevAb = 0;
 unsigned gVitaFxEarly[2];
 static float sFogZmax;
 static int sHadIds, sHadFog, sEarlyIds, sEarlyFog, sKeepDepth;

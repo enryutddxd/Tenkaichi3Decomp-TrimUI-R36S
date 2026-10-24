@@ -34,6 +34,7 @@ Ajustes opcionales en Data/ports/bt3/bt3.txt (una línea por ajuste):
   fxtbl=0          sin niebla ni ajustes de color
   fxol=0           sin el contorno de los personajes
   glowhalf=0       el brillo calculado en cada imagen (más lento)
+  fxprev=0         la niebla y los ids calculados a mitad de la imagen, sin una imagen de retraso (más lento)
   wide=0          imagen 4:3 en el centro
   vsync=0         sin esperar el refresco de pantalla
 
