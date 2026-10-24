@@ -1,0 +1,15 @@
+Dragon Ball Z: Budokai Tenkaichi 3 — TrimUI Smart Pro / R36S port
+Copyright (C) 2026 monseyo521 (TrimUI Smart Pro and R36S port: port/r36s, port/trimui and the changes for them)
+Copyright (C) 2026 arielxflores (Tenkaichi3Decomp-Vita: the PS Vita port, port/vita)
+Copyright (C) 2026 z3xox and contributors (Tenkaichi3Decomp: the PC port; the earlier part under the MIT license,
+                   see LICENSE-MIT.txt)
+The game's code comes from the BT3-Decompiled decompilation; Dragon Ball Z: Budokai Tenkaichi 3 belongs to its
+rights holders (Spike, Bandai Namco). No game data is included.
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General
+Public License as published by the Free Software Foundation, version 3. It is distributed WITHOUT ANY WARRANTY;
+see the full license text below. This version is a modified version of Tenkaichi3Decomp-Vita
+(https://github.com/arielxflores/Tenkaichi3Decomp-Vita). Third-party components: THIRD_PARTY.txt.
+
+================================================================================================================
+

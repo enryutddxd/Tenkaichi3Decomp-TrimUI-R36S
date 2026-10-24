@@ -24,6 +24,12 @@
 | The PSP SDK's 8 x 8 debug font (`port/r36s/third_party/r36s_font.h`, from vitasdk/samples' `debugScreenFont.c`) | The text screen | BSD (PSPSDK) |
 | [zig](https://ziglang.org/) (build time) | The C compiler and glibc 2.28 stubs for armhf | MIT |
 
+## In the TrimUI Smart Pro program (`port/r36s` built for aarch64, `port/trimui`)
+
+The same as the R36S program's (SDL2 headers, Khronos headers, the PSP SDK's debug font; SDL2, EGL and the
+PowerVR OpenGL ES driver are the system's own, not included), with [zig](https://ziglang.org/) at build time for
+aarch64 and glibc 2.33. `port/tools/irfix.py` (an LLVM IR fix-up) is this port's own.
+
 ## Used at build time only
 
 | Component | Use | License |

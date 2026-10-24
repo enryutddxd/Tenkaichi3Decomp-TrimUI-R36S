@@ -1,5 +1,5 @@
-Dragon Ball Z: Budokai Tenkaichi 3 — TrimUI Smart Pro (sistema stock + PortMaster) — VERSIÓN DE PRUEBA
-=====================================================================================================
+Dragon Ball Z: Budokai Tenkaichi 3 — TrimUI Smart Pro (sistema stock + PortMaster)
+==========================================================================
 
 ESPAÑOL
 -------
@@ -45,5 +45,34 @@ Install: copy the zip's contents to the root of the SD card (Roms/PORTS/ and Dat
 SLUS_216.78 and the BIN and DATA folders of your own disc image to Data/ports/bt3/disc/. Start it from Ports.
 START + SELECT held for two seconds quits. On a problem, send log.txt, err.txt, launcher.txt and crash.txt.
 
-License: the port code is under the GNU AGPL v3 (LICENSE.txt). The game's code comes from the decompilation and
-the game's data from your own disc.
+
+CRÉDITOS / CREDITS
+------------------
+  - Port para TrimUI Smart Pro y R36S (capa Linux/SDL2/OpenGL ES, optimización para PowerVR):
+    monseyo521 (con ayuda de Claude, de Anthropic).
+    TrimUI Smart Pro and R36S port (Linux/SDL2/OpenGL ES layer, PowerVR work): monseyo521 (with Claude, by Anthropic).
+  - Port de PS Vita en el que se basa (renderer, sistema, opciones): arielxflores
+    https://github.com/arielxflores/Tenkaichi3Decomp-Vita
+    The PS Vita port this is built on (renderer, system layer, options): arielxflores.
+  - Port de PC Tenkaichi3Decomp: z3xox y colaboradores — https://github.com/z3xox/Tenkaichi3Decomp
+    The Tenkaichi3Decomp PC port: z3xox and contributors.
+  - La decompilación BT3-Decompiled y sus autores. / The BT3-Decompiled decompilation and its authors.
+  - Spike / Bandai Namco: Dragon Ball Z: Budokai Tenkaichi 3, el juego original (sus derechos son de sus dueños).
+    Spike / Bandai Namco: the original game (its rights belong to its owners).
+  - Rinnegatamante (vitaGL, cuya interfaz imita la capa de este port), el equipo de SDL, Khronos, PortMaster.
+  - Código de terceros: THIRD_PARTY.txt. / Third-party code: THIRD_PARTY.txt.
+
+LICENCIA / LICENSE
+------------------
+El código del port está bajo la GNU Affero General Public License v3 (LICENSE.txt), igual que el port de Vita en
+que se basa; la parte anterior a ese cambio de licencia venía bajo MIT, cuyo aviso se conserva en LICENSE-MIT.txt.
+Esta versión está modificada respecto al port de Vita de arielxflores (ver créditos). Por la AGPL, el código
+fuente completo de esta versión está disponible para quien lo reciba; pídelo al autor del port (monseyo521).
+El código del juego viene de la decompilación; los datos del juego, de tu propio disco. Este proyecto no está
+afiliado ni respaldado por los dueños del juego.
+
+The port code is under the GNU AGPL v3 (LICENSE.txt), as the Vita port it is built on; the earlier part came under
+MIT, whose notice is kept in LICENSE-MIT.txt. This version is modified from arielxflores' Vita port. Under the
+AGPL, the complete source code of this version is available to whoever receives it: ask the port's author
+(monseyo521). The game's code comes from the decompilation; the game's data from your own disc. Not affiliated
+with or endorsed by the game's rights holders.

@@ -447,7 +447,12 @@ def package():
     (game / "disc/PUT_YOUR_DISC_FILES_HERE.txt").write_text(
         "Copy SLUS_216.78 and the BIN and DATA folders of your own USA disc (SLUS-21678) here.\n"
         "Copia aqui SLUS_216.78 y las carpetas BIN y DATA de tu propio disco USA (SLUS-21678).\n")
-    shutil.copy(ROOT / "LICENSE", game / "LICENSE.txt")
+    if TSP:  # (the notices first, then the AGPL's text; the MIT notice and the third-party list beside it)
+        (game / "LICENSE.txt").write_text((P / "NOTICE.txt").read_text() + (ROOT / "LICENSE").read_text())
+        shutil.copy(ROOT / "LICENSE-MIT", game / "LICENSE-MIT.txt")
+        shutil.copy(ROOT / "THIRD_PARTY.md", game / "THIRD_PARTY.txt")
+    else:
+        shutil.copy(ROOT / "LICENSE", game / "LICENSE.txt")
     zipname = OUT / ("Tenkaichi3Decomp-TrimUI.zip" if TSP else "Tenkaichi3Decomp-R36S.zip")
     if zipname.exists():
         zipname.unlink()

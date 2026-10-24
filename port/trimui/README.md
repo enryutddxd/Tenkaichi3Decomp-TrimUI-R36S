@@ -24,6 +24,12 @@ The log warns (`tsp: ... above 4 GB`) if a stack or a memory block ever lands hi
 
 ## Defaults
 
-16:9 (`wide=1`), fights drawn at 960×540, menus at 1280×720 (`bt3.txt`: `res=`, `menures=`), the processor's
-counter as the clock, `performance` governor while the game runs. `launcher.txt`, `log.txt`, `crash.txt` (aarch64
-registers and the calls on the stack) are written next to the program.
+16:9 (`wide=1`), fights and menus drawn at 854×480 (`bt3.txt`: `res=`, `menures=`), the work targets' effects and
+the glow off (`fxwt=1`, `fxglow=1`), the processor at 1608 MHz with the `performance` governor while the game runs.
+`launcher.txt`, `log.txt`, `crash.txt` (aarch64 registers and the calls on the stack) are written next to the
+program; `prof.txt` in the test builds (the release launcher sets `R36_PROF=0`).
+
+## Credits
+
+arielxflores (the PS Vita port this runs), z3xox and contributors (Tenkaichi3Decomp), the BT3-Decompiled authors;
+the TrimUI port by monseyo521. License: AGPL-3.0 (`LICENSE`), the earlier code's MIT notice in `LICENSE-MIT`.
