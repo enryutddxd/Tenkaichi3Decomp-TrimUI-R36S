@@ -32,4 +32,4 @@ program; `prof.txt` in the test builds (the release launcher sets `R36_PROF=0`).
 ## Credits
 
 arielxflores (the PS Vita port this runs), z3xox and contributors (Tenkaichi3Decomp), the BT3-Decompiled authors;
-the TrimUI port by monseyo521. License: AGPL-3.0 (`LICENSE`), the earlier code's MIT notice in `LICENSE-MIT`.
+the TrimUI port by EnryuTG. License: AGPL-3.0 (`LICENSE`), the earlier code's MIT notice in `LICENSE-MIT`.

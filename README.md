@@ -130,7 +130,7 @@ changes the Vita needed in the shared code, most of them inside `#ifdef PORT_VIT
 ## Credits
 
 - [arielxflores](https://github.com/arielxflores), the PS Vita port (`port/vita`)
-- monseyo521, the R36S and TrimUI Smart Pro ports (`port/r36s`, `port/trimui`), with Claude (Anthropic)
+- EnryuTG, the R36S and TrimUI Smart Pro ports (`port/r36s`, `port/trimui`), with Claude (Anthropic)
 - [z3xox](https://github.com/z3xox) and the contributors of
   [Tenkaichi3Decomp](https://github.com/z3xox/Tenkaichi3Decomp), the PC port this one is built on, and the
   authors of the BT3-Decompiled decompilation it uses
