@@ -6139,7 +6139,8 @@ static void fx_quad(void) {
    The passes' results are one picture late. bt3.txt fxprev. */
 int gVitaFxPrev = 1, gVitaFxPrevAb = 0;
 int gVitaNoDropAb = 0; /* (TrimUI test build) bt3.txt nodropab */
-unsigned gVitaFxEarly[2];
+unsigned gVitaFxEarly[3];
+static unsigned sDepthWAtFog;
 static float sFogZmax;
 static int sHadIds, sHadFog, sEarlyIds, sEarlyFog, sKeepDepth;
 static void ids_run(GLuint view);
@@ -6153,8 +6154,19 @@ static void fx_early(void) {
     int had = 0;
 #endif
     sEarlyIds = sEarlyFog = 0;
+#ifdef PORT_R36S
+    {   /* the picture before's depth as it was at its fog pass: not written or cleared after it (the night stages
+           clear it, and their fog from the depth at the end was the stage all black) */
+        extern unsigned gR36DepthW;
+        if (sHadFog && gR36DepthW != sDepthWAtFog) {
+            sHadFog = 0;
+            gVitaFxEarly[2]++;
+        }
+    }
+#endif
     if (gVitaFxPrev && had) {
-        if (sHadIds && sOlTex[(gxm_back_buffer_index + 2) % 3] != 0) {
+        if (0 && sHadIds && sOlTex[(gxm_back_buffer_index + 2) % 3] != 0) { /* (the ids from the picture's end: the alpha
+            written after the copy, the big letters' outline ("READY") wrong; never) */
             ids_run(sOlTex[(gxm_back_buffer_index + 2) % 3]);
             sEarlyIds = sIdsOk;
             gVitaFxEarly[0]++;
@@ -6209,6 +6221,12 @@ static void fog_exec(const uint8_t *p) {
     memcpy(&zmax, p, 4);
     sHadFog = 1;
     sFogZmax = zmax;
+#ifdef PORT_R36S
+    {
+        extern unsigned gR36DepthW;
+        sDepthWAtFog = gR36DepthW;
+    }
+#endif
     if (sEarlyFog) {
         sFogOk = 1;
         return;
@@ -6327,6 +6345,10 @@ static void tbl_exec(const uint8_t *p) {
         fog_run(sDepthTex, op->zmax);
         sHadFog = 1;
         sFogZmax = op->zmax;
+        {
+            extern unsigned gR36DepthW;
+            sDepthWAtFog = gR36DepthW;
+        }
     }
 #endif
     k = op->src == 0 ? (sFogOk ? 4 : 2) : 1;

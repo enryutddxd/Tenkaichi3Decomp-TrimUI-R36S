@@ -1145,9 +1145,13 @@ void r36_glScissor(GLint x, GLint y, GLsizei w, GLsizei h) {
     p_glScissor(x, sOnDisp ? sDispH - y - h : y, w, h);
     LEAVE();
 }
+unsigned gR36DepthW; /* (vita_vgl.c fxprev) the display buffer's depth written or cleared: draws and clears that could */
 void r36_glClear(GLbitfield mask) {
     ENTER();
     sEv |= 256;
+    if (sOnDisp && (mask & GL_DEPTH_BUFFER_BIT)) {
+        gR36DepthW++;
+    }
     p_glClear(mask);
     LEAVE();
 }
@@ -1979,8 +1983,12 @@ static void draw_done(unsigned long long t0) {
     }
     sEv = 0;
 }
+static GLboolean sDepthW = GL_TRUE;
 static void pre_draw(void) {
     gR36Draws++;
+    if (sOnDisp && sCapDepth && sDepthW) {
+        gR36DepthW++;
+    }
     flush_dirty();
     if (sCurProg != 0 && (int)sCurProg < sProgCap) {
         Prog *p = &sProg[sCurProg];
@@ -2081,7 +2089,6 @@ void R36_DiscardColor(void) {
 /* the clear values and write masks as the renderer set them (R36_ClearRect puts them back) */
 static GLfloat sClrC[4] = {0, 0, 0, 1}, sClrD = 0.0f;
 static GLint sClrS;
-static GLboolean sDepthW = GL_TRUE;
 static GLuint sStenW = 0xFFFFFFFFu;
 void r36_glClearColor(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { ENTER(); sClrC[0] = r; sClrC[1] = g; sClrC[2] = b; sClrC[3] = a; p_glClearColor(r, g, b, a); LEAVE(); }
 void r36_glClearDepthf(GLfloat d) { ENTER(); sClrD = d; p_glClearDepthf(d); LEAVE(); }
@@ -2120,6 +2127,9 @@ void R36_ClearRect(float x0, float y0, float x1, float y1, int alpha, int depth,
         bits |= GL_COLOR_BUFFER_BIT;
     }
     if (depth) {
+        if (sOnDisp) {
+            gR36DepthW++;
+        }
         p_glDepthMask(GL_TRUE);
         p_glClearDepthf(dval);
         bits |= GL_DEPTH_BUFFER_BIT;

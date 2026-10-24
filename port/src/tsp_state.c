@@ -61,10 +61,10 @@ void R36_GameState(FILE *f) {
         extern int gVitaFxRot, gVitaFxRotAb;
         fprintf(f, "  ids/fog targets in three sets: %s%s\n", gVitaFxRot ? "on" : "off", gVitaFxRotAb ? " (A/B, 10 s each)" : "");
         extern int gR36UbLim, gVitaFxPrev, gVitaFxPrevAb;
-        extern unsigned gVitaFxEarly[2];
-        static unsigned pe[2];
-        fprintf(f, "  ids/fog from the picture before: %s%s, %u ids and %u fog passes made early\n", gVitaFxPrev ? "on" : "off", gVitaFxPrevAb ? " (A/B, 10 s each)" : "",
-                gVitaFxEarly[0] - pe[0], gVitaFxEarly[1] - pe[1]);
+        extern unsigned gVitaFxEarly[3];
+        static unsigned pe[3];
+        fprintf(f, "  fog from the picture before: %s%s, %u fog passes made early, %u not (the depth written after the fog pass)\n", gVitaFxPrev ? "on" : "off",
+                gVitaFxPrevAb ? " (A/B, 10 s each)" : "", gVitaFxEarly[1] - pe[1], gVitaFxEarly[2] - pe[2]);
         memcpy(pe, gVitaFxEarly, sizeof(pe));
         fprintf(f, "  stage strips on the batched program: %s%s, %u draws; uniform slots in use only: %s\n", gVitaStBk ? "on" : "off", gVitaStBkAb ? " (A/B, 10 s each)" : "",
                 gVitaStBkN - pn, gR36UbLim ? "on" : "off");
