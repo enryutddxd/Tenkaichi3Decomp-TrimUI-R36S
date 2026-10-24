@@ -6133,6 +6133,7 @@ static void fx_quad(void) {
    scene is not split twice in its middle to read its alpha and depth (each split ~1.5 ms of the driver's waiting).
    The passes' results are one picture late. bt3.txt fxprev. */
 int gVitaFxPrev = 1, gVitaFxPrevAb = 0;
+int gVitaNoDropAb = 1; /* (TrimUI test build) bt3.txt nodropab */
 unsigned gVitaFxEarly[2];
 static float sFogZmax;
 static int sHadIds, sHadFog, sEarlyIds, sEarlyFog, sKeepDepth;
@@ -6910,6 +6911,11 @@ void GsGpu_FrameEnd(void) {
             extern volatile unsigned gR36ProfWindow;
             extern int gR36UbMode;
             gR36UbMode = 1 + (int)(gR36ProfWindow % 4u);
+        }
+        if (gVitaNoDropAb) { /* in turn: every picture shown; the newest only (as before) */
+            extern volatile unsigned gR36ProfWindow;
+            extern int gR36NoDrop;
+            gR36NoDrop = (gR36ProfWindow & 1) == 0;
         }
         if (gVitaFxPrevAb) { /* in turn: the ids and fog passes as before; from the picture before, at the picture's start */
             extern volatile unsigned gR36ProfWindow;

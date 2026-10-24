@@ -2496,12 +2496,13 @@ static void present_init(void) {
     R36_LogLine("r36 gl: pictures put on the screen by a thread of their own\n");
 }
 /* (render context) buffer b handed over to be shown; anything older queued and not taken yet is dropped */
+extern int gR36NoDrop;
 static void present_post(int b, GLuint tex, int w, int h, float aspect) {
     GLsync f = p_glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     int k;
     p_glFlush();
     pthread_mutex_lock(&sPrLock);
-    for (k = 0; k < sPrQn; k++) { /* (a newer picture: the older ones not shown) */
+    for (k = 0; k < sPrQn && !gR36NoDrop; k++) { /* (a newer picture: the older ones not shown) */
         int o = sPrQ[k];
         if (sPrJob[o].ready != NULL) {
             p_glDeleteSync(sPrJob[o].ready);
@@ -2510,7 +2511,9 @@ static void present_post(int b, GLuint tex, int w, int h, float aspect) {
         sPb[o].state = PB_FREE;
         gR36Present[1]++;
     }
-    sPrQn = 0;
+    if (!gR36NoDrop) {
+        sPrQn = 0;
+    }
     sPrJob[b].buf = b;
     sPrJob[b].tex = tex;
     sPrJob[b].w = w;
@@ -2527,9 +2530,25 @@ static void present_post(int b, GLuint tex, int w, int h, float aspect) {
     pthread_mutex_unlock(&sPrLock);
 }
 /* (render context) buffer b about to be drawn into: not while it is shown */
+int gR36NoDrop = 1; /* every picture shown, in turn (a queue of two at most): none dropped for a newer one */
 static void present_claim(int b) {
     GLsync rd = NULL;
     pthread_mutex_lock(&sPrLock);
+    if (gR36NoDrop && sPb[b].state == PB_QUEUED) { /* (not shown yet: waited for, at most 100 ms) */
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_nsec += 100000000L;
+        if (ts.tv_nsec >= 1000000000L) {
+            ts.tv_sec++;
+            ts.tv_nsec -= 1000000000L;
+        }
+        while (sPb[b].state == PB_QUEUED) {
+            gR36Present[2]++;
+            if (pthread_cond_timedwait(&sPrCond, &sPrLock, &ts) != 0) {
+                break;
+            }
+        }
+    }
     if (sPb[b].state == PB_QUEUED) { /* (never taken: dropped) */
         int k, m = 0;
         for (k = 0; k < sPrQn; k++) {

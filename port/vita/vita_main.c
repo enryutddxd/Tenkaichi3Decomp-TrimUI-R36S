@@ -1253,6 +1253,13 @@ static void read_settings(void) {
             extern int gVitaStBk, gVitaStBkAb;
             gVitaStBk = atoi(eq);
             gVitaStBkAb = 0;
+        } else if (strcmp(line, "nodrop") == 0) { /* (TrimUI) 0: a picture not shown yet dropped for a newer one */
+            extern int gR36NoDrop, gVitaNoDropAb;
+            gR36NoDrop = atoi(eq);
+            gVitaNoDropAb = 0;
+        } else if (strcmp(line, "nodropab") == 0) {
+            extern int gVitaNoDropAb;
+            gVitaNoDropAb = atoi(eq);
         } else if (strcmp(line, "fxprev") == 0) { /* (TrimUI) 1: the ids and fog passes from the picture before, at the start */
             extern int gVitaFxPrev, gVitaFxPrevAb;
             gVitaFxPrev = atoi(eq);

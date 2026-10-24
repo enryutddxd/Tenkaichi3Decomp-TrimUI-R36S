@@ -27,7 +27,9 @@ void R36_GameState(FILE *f) {
     {
         extern unsigned gR36Present[3];
         static unsigned pp[3];
-        fprintf(f, "  present thread: %u shown, %u dropped, %u waits\n", gR36Present[0] - pp[0], gR36Present[1] - pp[1], gR36Present[2] - pp[2]);
+        extern int gR36NoDrop, gVitaNoDropAb;
+        fprintf(f, "  present thread: %u shown, %u dropped, %u waits; every picture shown: %s%s\n", gR36Present[0] - pp[0], gR36Present[1] - pp[1], gR36Present[2] - pp[2],
+                gR36NoDrop ? "on" : "off", gVitaNoDropAb ? " (A/B, 10 s each)" : "");
         memcpy(pp, gR36Present, sizeof(pp));
     }
     {
