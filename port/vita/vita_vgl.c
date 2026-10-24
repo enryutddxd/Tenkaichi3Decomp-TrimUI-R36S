@@ -2927,6 +2927,124 @@ static void apply_fixed(const State *s) {
     }
     scissor_of(s);
 }
+#ifdef PORT_R36S
+/* (TrimUI) A batch of untextured GS sprites with vertex alpha 0 that leave the colour as it is (only the alpha
+   written, or blended with the source's alpha 0) and cover their rectangle whole: the picture's alpha cleared there
+   (and the depth, with ZTST ALWAYS and its write, when all of it is one depth; and the stencil's copy of alpha bit 7)
+   by a clear instead of two to eight screens drawn pixel by pixel a picture. bt3.txt aclear=0: drawn as before. */
+int gVitaAClear = 1;
+unsigned gVitaAClr[3]; /* (for the log) batches cleared, their sprites, batches looked at and drawn after all */
+static int clear_try(const FlushIn *in) {
+    extern void R36_ClearRect(float x0, float y0, float x1, float y1, int alpha, int depth, float dval, int sten, int sval);
+    const State *s = &in->s;
+    static float rx[2][256], ry[2][256];
+    int n = in->vertCount, k, j, nr = 0, alpha, depth, sten;
+    float bx0 = 1e9f, by0 = 1e9f, bx1 = -1e9f, by1 = -1e9f, z0 = 0.0f, area = 0.0f;
+    if (!gVitaAClear || in->kind != 0 || in->idx != NULL || s->topo || (s->tme && s->tex != 0) || s->date || s->fba ||
+        n % 6 != 0 || n / 6 > 256 || s->pad_[0]) {
+        return 0;
+    }
+    if (s->atest && s->afunc != 1 && !(s->afunc == 5 && s->aref == 0)) {
+        return 0; /* (an alpha test: alpha 0 may fail it) */
+    }
+    if ((s->mask & 7) != 0 && !(s->blend && s->src == 2 && (s->dst == 1 || s->dst == 3) && s->eq == 0)) {
+        return 0; /* (the colour would change) */
+    }
+    if (s->ztest && s->zfunc != 1) {
+        return 0; /* (a depth test that may fail) */
+    }
+    alpha = (s->mask & 8) != 0;
+    depth = s->ztest && s->zwrite;
+    sten = s->sop != 0;
+    for (k = 0; k < n; k++) {
+        const V *v = &in->verts[k];
+        if (v->c[3] != 0 || v->w <= 0.0f) {
+            return 0;
+        }
+        if (depth) {
+            float z = v->z / v->w;
+            if (k == 0) {
+                z0 = z;
+            } else if (z != z0) {
+                return 0;
+            }
+        }
+    }
+    for (k = 0; k < n; k += 6) { /* each sprite: two triangles over one rectangle */
+        float xa = 1e9f, xb = -1e9f, ya = 1e9f, yb = -1e9f, ar = 0.0f, dx[2], dy[2];
+        int nx = 0, ny = 0, q;
+        for (j = 0; j < 6; j++) {
+            const V *v = &in->verts[k + j];
+            float x = v->x / v->w, y = v->y / v->w;
+            for (q = 0; q < nx && dx[q] != x; q++) {
+            }
+            if (q == nx) {
+                if (nx == 2) {
+                    return 0; /* (a third x: not a rectangle) */
+                }
+                dx[nx++] = x;
+            }
+            for (q = 0; q < ny && dy[q] != y; q++) {
+            }
+            if (q == ny) {
+                if (ny == 2) {
+                    return 0;
+                }
+                dy[ny++] = y;
+            }
+            if (x < xa) { xa = x; }
+            if (x > xb) { xb = x; }
+            if (y < ya) { ya = y; }
+            if (y > yb) { yb = y; }
+        }
+        for (j = 0; j < 6; j += 3) {
+            const V *a = &in->verts[k + j], *b = &in->verts[k + j + 1], *c = &in->verts[k + j + 2];
+            float t = ((b->x / b->w - a->x / a->w) * (c->y / c->w - a->y / a->w) - (c->x / c->w - a->x / a->w) * (b->y / b->w - a->y / a->w)) * 0.5f;
+            ar += t < 0.0f ? -t : t;
+        }
+        if (xb <= xa || yb <= ya || fabsf(ar - (xb - xa) * (yb - ya)) > 1e-5f + (xb - xa) * (yb - ya) * 1e-3f) {
+            return 0; /* (the two triangles do not fill it) */
+        }
+        for (j = 0; j < nr; j++) { /* (the same rectangle again: once) */
+            if (rx[0][j] == xa && rx[1][j] == xb && ry[0][j] == ya && ry[1][j] == yb) {
+                break;
+            }
+        }
+        if (j < nr) {
+            continue;
+        }
+        for (j = 0; j < nr; j++) { /* (rectangles that overlap: not looked into further) */
+            if (xa < rx[1][j] && rx[0][j] < xb && ya < ry[1][j] && ry[0][j] < yb) {
+                gVitaAClr[2]++;
+                return 0;
+            }
+        }
+        rx[0][nr] = xa; rx[1][nr] = xb; ry[0][nr] = ya; ry[1][nr] = yb;
+        nr++;
+        area += (xb - xa) * (yb - ya);
+        if (xa < bx0) { bx0 = xa; }
+        if (xb > bx1) { bx1 = xb; }
+        if (ya < by0) { by0 = ya; }
+        if (yb > by1) { by1 = yb; }
+    }
+    if (fabsf(area - (bx1 - bx0) * (by1 - by0)) > (bx1 - bx0) * (by1 - by0) * 1e-3f) {
+        gVitaAClr[2]++;
+        return 0; /* (the rectangles do not make one whole rectangle) */
+    }
+    if (!alpha && !depth && !sten) {
+        gVitaAClr[0]++;
+        gVitaAClr[1] += (unsigned)(n / 6);
+        return 1; /* (it changes nothing) */
+    }
+    target_set(s->target);
+    scissor_of(s);
+    R36_ClearRect(bx0, by0, bx1, by1, alpha, depth, z0 * 0.5f + 0.5f, sten, s->sop - 1);
+    gVitaAClr[0]++;
+    gVitaAClr[1] += (unsigned)(n / 6);
+    gVglBatches++;
+    return 1;
+}
+#endif
 static void flush_impl(const FlushIn *in) {
     const State *s = &in->s;
     const GLuint useProg = in->kind == 1 ? sStageProg : in->kind == 2 ? sFtProg : sProg;
@@ -2939,6 +3057,11 @@ static void flush_impl(const FlushIn *in) {
     if (in->prof > 0 && ((in->kind == 1 && (in->prof == 5 || in->prof == 7)) || (in->kind == 2 && (in->prof == 6 || in->prof == 7)))) {
         return; /* (the GPU profile: this part left out) */
     }
+#ifdef PORT_R36S
+    if (clear_try(in)) {
+        return;
+    }
+#endif
     target_set(s->target); /* (the picture or the work page) */
     if (sLogFrames > 0) {
         Vita_Log("vgl: batch %u: %d vertices, %s, texture %u env %u, blend %u (%u,%u,%u), alpha test %u (%u,%u), depth %u (%u,%u), mask %x, scissor %d %d %d %d\n",

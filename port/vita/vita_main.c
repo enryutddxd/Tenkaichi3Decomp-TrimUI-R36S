@@ -1245,6 +1245,9 @@ static void read_settings(void) {
             gVitaGpuAb = atoi(eq);
         } else if (strcmp(line, "discard") == 0) { /* (TrimUI) 0: the targets' old contents loaded by the GPU as before */
             setenv("R36_DISCARD", eq, 1);
+        } else if (strcmp(line, "aclear") == 0) { /* (TrimUI) 0: the GS sprites that clear the alpha drawn as before */
+            extern int gVitaAClear;
+            gVitaAClear = atoi(eq);
         } else if (strcmp(line, "glowhalf") == 0) { /* (TrimUI) 0: each glow worked out every picture */
             extern int gVitaGlowHalf;
             gVitaGlowHalf = atoi(eq);

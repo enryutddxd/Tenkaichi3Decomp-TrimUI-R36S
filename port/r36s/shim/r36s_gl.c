@@ -30,6 +30,7 @@
 #include <string.h>
 #include <time.h>
 #include <dlfcn.h>
+#include <math.h>
 #include "vitaGL.h"
 
 extern void Vita_Log(const char *fmt, ...);
@@ -1915,6 +1916,79 @@ void R36_DiscardColor(void) {
     p_glInvalidateFramebuffer(GL_FRAMEBUFFER, 1, kC);
     LEAVE();
 }
+/* the clear values and write masks as the renderer set them (R36_ClearRect puts them back) */
+static GLfloat sClrC[4] = {0, 0, 0, 1}, sClrD = 0.0f;
+static GLint sClrS;
+static GLboolean sDepthW = GL_TRUE;
+static GLuint sStenW = 0xFFFFFFFFu;
+void r36_glClearColor(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { ENTER(); sClrC[0] = r; sClrC[1] = g; sClrC[2] = b; sClrC[3] = a; p_glClearColor(r, g, b, a); LEAVE(); }
+void r36_glClearDepthf(GLfloat d) { ENTER(); sClrD = d; p_glClearDepthf(d); LEAVE(); }
+void r36_glClearStencil(GLint v) { ENTER(); sClrS = v; p_glClearStencil(v); LEAVE(); }
+void r36_glDepthMask(GLboolean f) { ENTER(); sDepthW = f; p_glDepthMask(f); sEv |= 16; LEAVE(); }
+void r36_glStencilMask(GLuint m) { ENTER(); sStenW = m; p_glStencilMask(m); sEv |= 16; LEAVE(); }
+/* (vita_vgl.c) a rectangle in the current viewport's units (-1..1) cleared instead of drawn: the alpha to 0
+   (alpha != 0), the depth to dval (depth != 0), stencil bit 0 to sval (sten != 0); inside the scissor as it is. On a
+   tile-based GPU a clear costs nothing per pixel; the GS sprites that clear the picture's alpha (two to eight
+   screens a picture) were drawn pixel by pixel. */
+void R36_ClearRect(float x0, float y0, float x1, float y1, int alpha, int depth, float dval, int sten, int sval) {
+    float fx0 = (float)sVp[0] + (x0 * 0.5f + 0.5f) * (float)sVp[2], fx1 = (float)sVp[0] + (x1 * 0.5f + 0.5f) * (float)sVp[2];
+    float fy0 = (float)sVp[1] + (y0 * 0.5f + 0.5f) * (float)sVp[3], fy1 = (float)sVp[1] + (y1 * 0.5f + 0.5f) * (float)sVp[3];
+    int ix0, ix1, iy0, iy1;
+    GLbitfield bits = 0;
+    if (fx0 > fx1) { float t = fx0; fx0 = fx1; fx1 = t; }
+    if (fy0 > fy1) { float t = fy0; fy0 = fy1; fy1 = t; }
+    /* (the pixels whose centres are inside, as the triangles would have drawn) */
+    ix0 = (int)ceilf(fx0 - 0.5f); ix1 = (int)ceilf(fx1 - 0.5f);
+    iy0 = (int)ceilf(fy0 - 0.5f); iy1 = (int)ceilf(fy1 - 0.5f);
+    if (sScOn) {
+        if (ix0 < sSc[0]) { ix0 = sSc[0]; }
+        if (iy0 < sSc[1]) { iy0 = sSc[1]; }
+        if (ix1 > sSc[0] + sSc[2]) { ix1 = sSc[0] + sSc[2]; }
+        if (iy1 > sSc[1] + sSc[3]) { iy1 = sSc[1] + sSc[3]; }
+    }
+    if (ix1 <= ix0 || iy1 <= iy0) {
+        return;
+    }
+    ENTER();
+    p_glEnable(GL_SCISSOR_TEST);
+    p_glScissor(ix0, sOnDisp ? sDispH - iy1 : iy0, ix1 - ix0, iy1 - iy0);
+    if (alpha) {
+        p_glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
+        p_glClearColor(0, 0, 0, 0);
+        bits |= GL_COLOR_BUFFER_BIT;
+    }
+    if (depth) {
+        p_glDepthMask(GL_TRUE);
+        p_glClearDepthf(dval);
+        bits |= GL_DEPTH_BUFFER_BIT;
+    }
+    if (sten) {
+        p_glStencilMask(1);
+        p_glClearStencil(sval);
+        bits |= GL_STENCIL_BUFFER_BIT;
+    }
+    p_glClear(bits);
+    /* (all of it back as it was) */
+    if (sScOn) {
+        p_glScissor(sSc[0], sOnDisp ? sDispH - sSc[1] - sSc[3] : sSc[1], sSc[2], sSc[3]);
+    } else {
+        p_glDisable(GL_SCISSOR_TEST);
+    }
+    if (alpha) {
+        p_glColorMask(sMask[0], sMask[1], sMask[2], sMask[3]);
+        p_glClearColor(sClrC[0], sClrC[1], sClrC[2], sClrC[3]);
+    }
+    if (depth) {
+        p_glDepthMask(sDepthW);
+        p_glClearDepthf(sClrD);
+    }
+    if (sten) {
+        p_glStencilMask(sStenW);
+        p_glClearStencil(sClrS);
+    }
+    sEv |= 256;
+    LEAVE();
+}
 /* (vita_vgl.c) indices in the stream at off, their vertices from vertex base on: 0 when the driver has no such draw */
 int R36_DrawElementsBase(GLenum mode, GLsizei count, GLenum type, long off, GLint base) {
     if (p_glDrawElementsBaseVertex == NULL || sCurProg == 0) {
@@ -2466,12 +2540,8 @@ R36_GL_PASS_V(glBlendEquation, (GLenum mode), (mode))
 R36_GL_PASS_V(glBlendEquationSeparate, (GLenum modeRGB, GLenum modeAlpha), (modeRGB, modeAlpha))
 R36_GL_PASS_V(glBlendFunc, (GLenum sfactor, GLenum dfactor), (sfactor, dfactor))
 R36_GL_PASS_V(glBlendFuncSeparate, (GLenum a, GLenum b, GLenum c, GLenum d), (a, b, c, d))
-R36_GL_PASS_V(glClearColor, (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha), (red, green, blue, alpha))
-R36_GL_PASS_V(glClearDepthf, (GLfloat d), (d))
-R36_GL_PASS_V(glClearStencil, (GLint s), (s))
 R36_GL_PASS(GLuint, glCreateProgram, (void), ())
 R36_GL_PASS_V(glDepthFunc, (GLenum func), (func))
-R36_GL_PASS_V(glDepthMask, (GLboolean flag), (flag))
 void r36_glDeleteFramebuffers(GLsizei n, const GLuint *framebuffers) {
     ENTER();
     p_glDeleteFramebuffers(n, framebuffers);
@@ -2486,7 +2556,6 @@ R36_GL_PASS_V(glGetShaderiv, (GLuint shader, GLenum pname, GLint *params), (shad
 R36_GL_PASS_V(glGetProgramiv, (GLuint program, GLenum pname, GLint *params), (program, pname, params))
 R36_GL_PASS_V(glGetProgramInfoLog, (GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog), (program, bufSize, length, infoLog))
 R36_GL_PASS_V(glStencilFunc, (GLenum func, GLint ref, GLuint mask), (func, ref, mask))
-R36_GL_PASS_V(glStencilMask, (GLuint mask), (mask))
 R36_GL_PASS_V(glStencilOp, (GLenum fail, GLenum zfail, GLenum zpass), (fail, zfail, zpass))
 R36_GL_PASS_V(glGenBuffers, (GLsizei n, GLuint *buffers), (n, buffers))
 R36_GL_PASS(GLenum, glGetError, (void), ())
