@@ -29,8 +29,8 @@ Si algo falla, mándame estos archivos de Data/ports/bt3/:
 Ajustes opcionales en Data/ports/bt3/bt3.txt (una línea por ajuste):
   res=1280x720     peleas a la resolución de la pantalla (por defecto 854x480)
   menures=1280x720 menús a la resolución de la pantalla (por defecto 854x480)
-  fxwt=0           sin los efectos de auras/distorsión (más fps)
-  fxglow=0         sin el brillo
+  fxwt=1           con los efectos de distorsión de los work targets (apagados por defecto: ~4 fps menos)
+  fxglow=1         con el brillo (apagado por defecto)
   fxtbl=0          sin niebla ni ajustes de color
   fxol=0           sin el contorno de los personajes
   glowhalf=0       el brillo calculado en cada imagen (más lento)

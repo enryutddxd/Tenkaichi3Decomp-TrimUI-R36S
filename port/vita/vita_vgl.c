@@ -1317,7 +1317,13 @@ extern int gVitaAClear;
 int gVitaGpuAb = 0;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
 int gVitaUbAb = 0;          /* (TrimUI test build) the uniform blocks' four ways in turn, 10 s each (r36s_gl.c gR36UbMode) */
 int gVitaOptAb = 0;         /* (TrimUI test build) the driver's ways of doing less (gR36Opt) off every other 10 s */
-int gVitaFxMask;            /* 1 the table passes, 2 the glow, 4 the work targets' effects, 8 the outline */
+#ifdef PORT_TSP /* (the TrimUI: the work targets' effects and the glow off by default: ~25 -> ~29.5 fps in a fight at 854 x 480, the
+                    look hardly changed; bt3.txt fxwt=1, fxglow=1 to have them) */
+int gVitaFxMask = 4 | 2;
+#else
+int gVitaFxMask;
+#endif
+/* 1 the table passes, 2 the glow, 4 the work targets' effects, 8 the outline */
 #define FX_WT_OFF (gVitaFxOff || (gVitaFxMask & 4))
 int gVitaClipOff;           /* the fighters' reject of program 0 not done (the log's pictures; bt3.txt safe2=512) */
 static unsigned sTblCbp[8][3]; /* table passes by palette block: block, drawn, not */
