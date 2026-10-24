@@ -480,6 +480,7 @@ typedef struct VTex {
     int alias;              /* 0 its own, 1..3 display buffer n-1, 4 the depth buffer */
     int used;
     GLint tp[4];            /* (gR36Opt) its filters and wraps as last set; 0 not known */
+    int tw, th;             /* its level 0's size when made RGBA8 by glTexImage2D (0: none yet), see the pool */
     SceGxmTexture gxm;      /* (vglGetGxmTexture: a stand-in nothing reads) */
 } VTex;
 static VTex *sTex;
@@ -818,6 +819,73 @@ void r36_glGenTextures(GLsizei n, GLuint *t) {
     }
     LEAVE();
 }
+/* ---- the pool of textures let go ----
+   The renderer makes some twenty textures a picture in a fight and lets as many go; on the PowerVR driver each
+   glTexImage2D of a new one asks the kernel for memory (PVRSRVAllocSparseDevMem2, page faults), each delete gives it
+   back. Here a texture let go is kept (up to POOL_N, POOL_MB) and given, three pictures later (the GPU done with
+   it), to the next new texture of its size: its pixels then go in with glTexSubImage2D. R36_TEXPOOL=0: not. */
+#define POOL_N 192
+#define POOL_MB 48u
+static struct { GLuint real; int w, h; GLint tp[4]; unsigned frame; } sPool[POOL_N];
+static int sPoolN = -1;
+static uint32_t sPoolBytes;
+unsigned gR36Pool[3]; /* (for the log) taken from the pool, kept in it, made the usual way */
+extern unsigned gR36Frames;
+static int pool_on(void) {
+    if (sPoolN < 0) {
+        const char *e = getenv("R36_TEXPOOL");
+        sPoolN = e != NULL && atoi(e) == 0 ? -2 : 0;
+    }
+    return sPoolN >= 0;
+}
+static int pool_take(int w, int h, VTex *t) {
+    int k;
+    for (k = 0; k < sPoolN; k++) {
+        if (sPool[k].w == w && sPool[k].h == h && gR36Frames - sPool[k].frame >= 3u) {
+            if (t->real != 0) {
+                p_glDeleteTextures(1, &t->real); /* (the name made for it, with nothing in it yet) */
+            }
+            t->real = sPool[k].real;
+            memcpy(t->tp, sPool[k].tp, sizeof(t->tp));
+            sPoolBytes -= (uint32_t)(w * h * 4);
+            sPool[k] = sPool[--sPoolN];
+            return 1;
+        }
+    }
+    return 0;
+}
+static int pool_keep(VTex *t) {
+    uint32_t b = (uint32_t)(t->tw * t->th * 4);
+    if (!pool_on() || t->tw <= 0 || t->real == 0 || t->alias != 0) {
+        return 0;
+    }
+    if (sPoolN == POOL_N || sPoolBytes + b > (POOL_MB << 20)) { /* (full: the oldest let go) */
+        int k, old = 0;
+        for (k = 1; k < sPoolN; k++) {
+            if ((int)(sPool[k].frame - sPool[old].frame) < 0) {
+                old = k;
+            }
+        }
+        if (sPoolN == 0) {
+            return 0;
+        }
+        p_glDeleteTextures(1, &sPool[old].real);
+        sPoolBytes -= (uint32_t)(sPool[old].w * sPool[old].h * 4);
+        sPool[old] = sPool[--sPoolN];
+        if (sPoolBytes + b > (POOL_MB << 20)) {
+            return 0;
+        }
+    }
+    sPool[sPoolN].real = t->real;
+    sPool[sPoolN].w = t->tw;
+    sPool[sPoolN].h = t->th;
+    memcpy(sPool[sPoolN].tp, t->tp, sizeof(t->tp));
+    sPool[sPoolN].frame = gR36Frames;
+    sPoolN++;
+    sPoolBytes += b;
+    gR36Pool[1]++;
+    return 1;
+}
 void r36_glDeleteTextures(GLsizei n, const GLuint *t) {
     ENTER();
     for (GLsizei i = 0; i < n; i++) {
@@ -825,7 +893,7 @@ void r36_glDeleteTextures(GLsizei n, const GLuint *t) {
         if (v == 0 || (int)v >= sTexCap || !sTex[v].used) {
             continue;
         }
-        if (sTex[v].real != 0) {
+        if (sTex[v].real != 0 && !pool_keep(&sTex[v])) {
             p_glDeleteTextures(1, &sTex[v].real);
         }
         for (int u = 0; u < 4; u++) {
@@ -862,6 +930,40 @@ void r36_glTexImage2D(GLenum target, GLint level, GLint ifmt, GLsizei w, GLsizei
     if (v != 0 && (int)v < sTexCap && sTex[v].alias != 0) { /* (a display buffer's own memory: not given new contents) */
         LEAVE();
         return;
+    }
+    if (v != 0 && (int)v < sTexCap && target == GL_TEXTURE_2D && level == 0 && border == 0 && (ifmt == GL_RGBA || ifmt == GL_RGBA8) &&
+        fmt == GL_RGBA && type == GL_UNSIGNED_BYTE && pool_on()) {
+        VTex *tv = &sTex[v];
+        if (tv->tw == w && tv->th == h) { /* (the same size again: its pixels only) */
+            if (px != NULL) {
+                p_glTexSubImage2D(target, 0, 0, 0, w, h, fmt, type, px);
+            }
+            sEv |= 8;
+            LEAVE();
+            return;
+        }
+        if (tv->tw == 0 && pool_take(w, h, tv)) { /* (a texture of that size let go three pictures ago) */
+            p_glBindTexture(GL_TEXTURE_2D, tv->real);
+            if (px != NULL) {
+                p_glTexSubImage2D(target, 0, 0, 0, w, h, fmt, type, px);
+            }
+            tv->tw = w;
+            tv->th = h;
+            gR36Pool[0]++;
+            sEv |= 8;
+            LEAVE();
+            return;
+        }
+        p_glTexImage2D(target, level, ifmt, w, h, border, fmt, type, px);
+        tv->tw = w;
+        tv->th = h;
+        gR36Pool[2]++;
+        sEv |= 8;
+        LEAVE();
+        return;
+    }
+    if (v != 0 && (int)v < sTexCap) {
+        sTex[v].tw = 0; /* (another kind of texture: not for the pool) */
     }
     p_glTexImage2D(target, level, ifmt, w, h, border, fmt, type, px);
     sEv |= 8;

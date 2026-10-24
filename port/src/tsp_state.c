@@ -45,6 +45,12 @@ void R36_GameState(FILE *f) {
         fprintf(f, "  alpha clears: %u batches (%u sprites) cleared, %u looked at and drawn\n", gVitaAClr[0] - pa[0], gVitaAClr[1] - pa[1], gVitaAClr[2] - pa[2]);
         memcpy(pa, gVitaAClr, sizeof(pa));
     }
+    {
+        extern unsigned gR36Pool[3];
+        static unsigned pq[3];
+        fprintf(f, "  texture pool: %u taken from it, %u kept, %u made new\n", gR36Pool[0] - pq[0], gR36Pool[1] - pq[1], gR36Pool[2] - pq[2]);
+        memcpy(pq, gR36Pool, sizeof(pq));
+    }
     extern int gVitaOptAb, gR36Opt;
     if (gVitaOptAb) {
         fprintf(f, "  OPT in these 10 s: %s\n", (gR36ProfWindow & 1) ? "off (A/B)" : "ON (A/B)");

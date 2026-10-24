@@ -1245,6 +1245,8 @@ static void read_settings(void) {
             gVitaGpuAb = atoi(eq);
         } else if (strcmp(line, "discard") == 0) { /* (TrimUI) 0: the targets' old contents loaded by the GPU as before */
             setenv("R36_DISCARD", eq, 1);
+        } else if (strcmp(line, "texpool") == 0) { /* (TrimUI) 0: textures let go are deleted at once, as before */
+            setenv("R36_TEXPOOL", eq, 1);
         } else if (strcmp(line, "aclear") == 0) { /* (TrimUI) 0: the GS sprites that clear the alpha drawn as before */
             extern int gVitaAClear;
             gVitaAClear = atoi(eq);
