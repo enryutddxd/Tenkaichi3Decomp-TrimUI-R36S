@@ -1192,6 +1192,15 @@ static void read_settings(void) {
         } else if (strcmp(line, "optab") == 0) {
             extern int gVitaOptAb;
             gVitaOptAb = atoi(eq);
+        } else if (strcmp(line, "fxwt") == 0 || strcmp(line, "fxglow") == 0 || strcmp(line, "fxtbl") == 0 || strcmp(line, "fxol") == 0) {
+            /* (one kind of effect off with =0: the work targets' effects (auras' distortion and the like), the glow, the table passes and fog, the outline) */
+            extern int gVitaFxMask;
+            int bit = line[2] == 'w' ? 4 : line[2] == 'g' ? 2 : line[2] == 't' ? 1 : 8;
+            if (atoi(eq) == 0) {
+                gVitaFxMask |= bit;
+            } else {
+                gVitaFxMask &= ~bit;
+            }
         } else if (strcmp(line, "fxab") == 0) { /* (TrimUI test build) the effects off every other 10 s */
             extern int gVitaFxAb;
             gVitaFxAb = atoi(eq);

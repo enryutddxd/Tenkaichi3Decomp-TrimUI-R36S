@@ -1313,6 +1313,7 @@ extern int gVitaSliver;
 int gVitaFxSweep;           /* the effects left out in turn, 60 pictures each, the chip's time logged by which */
 int gVitaFxAb = 0;          /* (TrimUI test build) see frame_begin */
 int gVitaGlowHalf = 1;      /* (see glow_exec) */
+extern int gVitaAClear;
 int gVitaGpuAb = 1;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
 int gVitaUbAb = 0;          /* (TrimUI test build) the uniform blocks' four ways in turn, 10 s each (r36s_gl.c gR36UbMode) */
 int gVitaOptAb = 0;         /* (TrimUI test build) the driver's ways of doing less (gR36Opt) off every other 10 s */
@@ -2934,6 +2935,8 @@ static void apply_fixed(const State *s) {
    by a clear instead of two to eight screens drawn pixel by pixel a picture. bt3.txt aclear=0: drawn as before. */
 int gVitaAClear = 1;
 unsigned gVitaAClr[3]; /* (for the log) batches cleared, their sprites, batches looked at and drawn after all */
+static FlushIn sAcIn;
+static V sAcQ[6];
 static int clear_try(const FlushIn *in) {
     extern void R36_ClearRect(float x0, float y0, float x1, float y1, int alpha, int depth, float dval, int sten, int sval);
     const State *s = &in->s;
@@ -3036,6 +3039,20 @@ static int clear_try(const FlushIn *in) {
         gVitaAClr[1] += (unsigned)(n / 6);
         return 1; /* (it changes nothing) */
     }
+    if (gVitaAClear == 2) { /* (aclear=2: one rectangle drawn with the batch's state instead of its sprites) */
+        static const int kc[6][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 0}, {1, 1}, {0, 1}};
+        sAcIn = *in;
+        for (k = 0; k < 6; k++) {
+            sAcQ[k] = in->verts[0];
+            sAcQ[k].x = (kc[k][0] ? bx1 : bx0) * sAcQ[k].w;
+            sAcQ[k].y = (kc[k][1] ? by1 : by0) * sAcQ[k].w;
+        }
+        sAcIn.verts = sAcQ;
+        sAcIn.vertCount = 6;
+        gVitaAClr[0]++;
+        gVitaAClr[1] += (unsigned)(n / 6);
+        return 2;
+    }
     target_set(s->target);
     scissor_of(s);
     R36_ClearRect(bx0, by0, bx1, by1, alpha, depth, z0 * 0.5f + 0.5f, sten, s->sop - 1);
@@ -3058,8 +3075,15 @@ static void flush_impl(const FlushIn *in) {
         return; /* (the GPU profile: this part left out) */
     }
 #ifdef PORT_R36S
-    if (clear_try(in)) {
-        return;
+    {
+        int ct = clear_try(in);
+        if (ct == 1) {
+            return;
+        }
+        if (ct == 2) {
+            in = &sAcIn;
+            s = &in->s;
+        }
     }
 #endif
     target_set(s->target); /* (the picture or the work page) */
@@ -6688,9 +6712,8 @@ void GsGpu_FrameEnd(void) {
         if (gVitaGpuAb && !gVitaGsSkip) {
             extern volatile unsigned gR36ProfWindow;
             static int keepW, keepH;
-            static const int kMask[6] = {0, 4, 2, 1, 8, 15}; /* (all; without the work targets' effects; the glow; the table passes and fog; the outline; none) */
             (void)keepW; (void)keepH;
-            gVitaFxMask = kMask[gR36ProfWindow % 6u];
+            gVitaAClear = 1 + (int)(gR36ProfWindow % 2u); /* (the alpha clears as clears, as one rectangle drawn) */
         }
         if (gVitaUbAb) {
             extern volatile unsigned gR36ProfWindow;
