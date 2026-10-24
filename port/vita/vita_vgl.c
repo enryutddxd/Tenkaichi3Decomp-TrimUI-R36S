@@ -1314,7 +1314,7 @@ int gVitaFxSweep;           /* the effects left out in turn, 60 pictures each, t
 int gVitaFxAb = 0;          /* (TrimUI test build) see frame_begin */
 int gVitaGlowHalf = 1;      /* (see glow_exec) */
 extern int gVitaAClear;
-int gVitaGpuAb = 1;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
+int gVitaGpuAb = 0;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
 int gVitaUbAb = 0;          /* (TrimUI test build) the uniform blocks' four ways in turn, 10 s each (r36s_gl.c gR36UbMode) */
 int gVitaOptAb = 0;         /* (TrimUI test build) the driver's ways of doing less (gR36Opt) off every other 10 s */
 int gVitaFxMask;            /* 1 the table passes, 2 the glow, 4 the work targets' effects, 8 the outline */
