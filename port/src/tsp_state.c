@@ -52,6 +52,13 @@ void R36_GameState(FILE *f) {
         fprintf(f, "  texture pool: %u taken from it, %u kept, %u made new\n", gR36Pool[0] - pq[0], gR36Pool[1] - pq[1], gR36Pool[2] - pq[2]);
         memcpy(pq, gR36Pool, sizeof(pq));
     }
+    {
+        extern unsigned gVitaPsw[4];
+        static unsigned pw[4];
+        fprintf(f, "  program changes: %u; GS <-> parts, same pixel shader %u, differing only by 16/64/1024 %u; within one side %u\n",
+                gVitaPsw[0] - pw[0], gVitaPsw[1] - pw[1], gVitaPsw[2] - pw[2], gVitaPsw[3] - pw[3]);
+        memcpy(pw, gVitaPsw, sizeof(pw));
+    }
     extern int gVitaOptAb, gR36Opt;
     if (gVitaOptAb) {
         fprintf(f, "  OPT in these 10 s: %s\n", (gR36ProfWindow & 1) ? "off (A/B)" : "ON (A/B)");

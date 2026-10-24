@@ -439,6 +439,25 @@ static char *dp_batch_src(const char *src, int slot, int k, int nu) {
 static GLuint sVsKind[7]; /* the vertex shaders: the GS's (clip-space vertices), the stage's, the fighters', the direct path's fighters' and stage's
                              (R36S: 5, 6 the direct path's batched: several parts with their own constants in one draw) */
 typedef struct Variant { GLuint prog; GLint test, tex, u[6]; int bk; /* (R36S: a batched direct kind) */ } Variant;
+/* (for the log) the program changes: all; between kinds (the GS's, the parts') with the same pixel shader flags; with
+   the flags differing only by 16/64/1024 (the GS's own vertex shader variants); within one kind */
+unsigned gVitaPsw[4];
+static int sPswKind = -1, sPswFlags = -1;
+static inline void psw_note(int kind, int flags) {
+    int k = kind == 0 ? 0 : 1;
+    gVitaPsw[0]++;
+    if (sPswKind >= 0 && k != sPswKind) {
+        if (flags == sPswFlags) {
+            gVitaPsw[1]++;
+        } else if (((flags ^ sPswFlags) & ~(16 | 64 | 1024)) == 0) {
+            gVitaPsw[2]++;
+        }
+    } else {
+        gVitaPsw[3]++;
+    }
+    sPswKind = k;
+    sPswFlags = flags;
+}
 /* The texture read straight from the interpolated coordinates (tex2D), not divided by Q in the pixel shader
    (tex2Dproj): the chip fetches such a texture before the shader runs, and a read that depends on arithmetic
    in the shader waits for it (the GPU profile of a fifth of the chip's time in a fight). The GS's
@@ -3182,6 +3201,7 @@ static void flush_impl(const FlushIn *in) {
             if (newProg) {
                 glUseProgram(var->prog);
                 sGlc.prog = var->prog;
+                psw_note(in->kind == 0 ? 0 : 1, vf);
             }
             if (fm) {
                 int tp = lin | s->wrapS << 1 | s->wrapT << 2;
@@ -9492,6 +9512,7 @@ static void dp_draw_items(DpItem *items, int n, int prof) {
             if (newProg) {
                 glUseProgram(var->prog);
                 sGlc.prog = var->prog;
+                psw_note(1, vflags);
             }
             if (fm) {
                 int tp = s->linear | s->wrapS << 1 | s->wrapT << 2;
