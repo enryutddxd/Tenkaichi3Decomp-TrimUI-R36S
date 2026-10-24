@@ -1568,10 +1568,15 @@ static void rt_fbegin_put(void);
 #endif
 static void glow_frame(void);
 static void fx_early(void);
+int gVitaFxRot = 1, gVitaFxRotAb = 1; /* (TrimUI) the ids/fog targets in three sets taken in turn (bt3.txt fxrot, fxrotab) */
 static void frame_begin_gl(void) { /* (the thread that makes the GL calls) */
     glow_frame();
+    /* (the ids' copy and the fog byte are this picture's only once made in it: a table pass before them, or in a
+       picture without them, does not read the set's textures, last written three pictures ago) */
+    sIdsOk = 0;
+    sFogOk = 0;
     if (sIdsTexA[0] != 0) { /* (this picture's copies: the next set) */
-        sFxSet++;
+        sFxSet += gVitaFxRot ? 1 : 0;
         sIdsTex = sIdsTexA[sFxSet % FXN];
         sIdsFbo = sIdsFboA[sFxSet % FXN];
         sFogTex = sFogTexA[sFxSet % FXN];
@@ -6133,7 +6138,7 @@ static void fx_quad(void) {
    scene is not split twice in its middle to read its alpha and depth (each split ~1.5 ms of the driver's waiting).
    The passes' results are one picture late. bt3.txt fxprev. */
 int gVitaFxPrev = 1, gVitaFxPrevAb = 0;
-int gVitaNoDropAb = 1; /* (TrimUI test build) bt3.txt nodropab */
+int gVitaNoDropAb = 0; /* (TrimUI test build) bt3.txt nodropab */
 unsigned gVitaFxEarly[2];
 static float sFogZmax;
 static int sHadIds, sHadFog, sEarlyIds, sEarlyFog, sKeepDepth;
@@ -6885,7 +6890,9 @@ void GsGpu_FrameEnd(void) {
     }
     sWpSlot = WP_OTHER; /* (the markers of the next picture say again) */
     sWpAgain = -1;
+#ifndef PORT_R36S
     sIdsOk = 0; /* (the copy of the ids is this picture's) */
+#endif
     sTblRun = 0;
     sGlowSkip = 0; /* */
     sOlTail = 0; /* */
@@ -6911,6 +6918,10 @@ void GsGpu_FrameEnd(void) {
             extern volatile unsigned gR36ProfWindow;
             extern int gR36UbMode;
             gR36UbMode = 1 + (int)(gR36ProfWindow % 4u);
+        }
+        if (gVitaFxRotAb) { /* in turn: the ids/fog targets in three sets; one set */
+            extern volatile unsigned gR36ProfWindow;
+            gVitaFxRot = (gR36ProfWindow & 1) == 0;
         }
         if (gVitaNoDropAb) { /* in turn: every picture shown; the newest only (as before) */
             extern volatile unsigned gR36ProfWindow;

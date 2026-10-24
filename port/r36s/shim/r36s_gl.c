@@ -2530,7 +2530,7 @@ static void present_post(int b, GLuint tex, int w, int h, float aspect) {
     pthread_mutex_unlock(&sPrLock);
 }
 /* (render context) buffer b about to be drawn into: not while it is shown */
-int gR36NoDrop = 1; /* every picture shown, in turn (a queue of two at most): none dropped for a newer one */
+int gR36NoDrop = 0; /* every picture shown, in turn (a queue of two at most): none dropped for a newer one */
 static void present_claim(int b) {
     GLsync rd = NULL;
     pthread_mutex_lock(&sPrLock);
