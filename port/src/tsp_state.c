@@ -56,7 +56,9 @@ void R36_GameState(FILE *f) {
         extern unsigned gVitaPsw[4], gVitaStBkN;
         extern int gVitaStBk, gVitaStBkAb;
         static unsigned pw[4], pn;
-        fprintf(f, "  stage strips on the batched program: %s%s, %u draws\n", gVitaStBk ? "on" : "off", gVitaStBkAb ? " (A/B, 10 s each)" : "", gVitaStBkN - pn);
+        extern int gR36UbLim;
+        fprintf(f, "  stage strips on the batched program: %s%s, %u draws; uniform slots in use only: %s\n", gVitaStBk ? "on" : "off", gVitaStBkAb ? " (A/B, 10 s each)" : "",
+                gVitaStBkN - pn, gR36UbLim ? "on" : "off");
         pn = gVitaStBkN;
         fprintf(f, "  program changes: %u; GS <-> parts, same pixel shader %u, differing only by 16/64/1024 %u; within one side %u\n",
                 gVitaPsw[0] - pw[0], gVitaPsw[1] - pw[1], gVitaPsw[2] - pw[2], gVitaPsw[3] - pw[3]);

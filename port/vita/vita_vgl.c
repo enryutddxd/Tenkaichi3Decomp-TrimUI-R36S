@@ -436,6 +436,9 @@ static char *dp_batch_src(const char *src, int slot, int k, int nu) {
     return o;
 }
 #endif
+#ifdef PORT_R36S
+extern void R36_UbLimit(GLint loc, int count);
+#endif
 static GLuint sVsKind[7]; /* the vertex shaders: the GS's (clip-space vertices), the stage's, the fighters', the direct path's fighters' and stage's
                              (R36S: 5, 6 the direct path's batched: several parts with their own constants in one draw) */
 typedef struct Variant { GLuint prog; GLint test, tex, u[6]; int bk; /* (R36S: a batched direct kind) */ } Variant;
@@ -3301,6 +3304,7 @@ static void flush_impl(const FlushIn *in) {
                 memcpy(b, m, 24 * sizeof(float));
                 b[24] = -1.0f; b[25] = 1e30f; b[26] = 1.0f; b[27] = 0.0f;
                 glUniform4fv(sVarUse->u[0], DPB_ST_SLOT, b);
+                R36_UbLimit(sVarUse->u[0], DPB_ST_SLOT);
                 gVitaStBkN++;
             } else
 #endif
@@ -6846,9 +6850,11 @@ void GsGpu_FrameEnd(void) {
             extern int gR36UbMode;
             gR36UbMode = 1 + (int)(gR36ProfWindow % 4u);
         }
-        if (gVitaStBkAb) {
+        if (gVitaStBkAb) { /* in turn: as v47; only the uniform slots in use copied; and the stage's strips on one program */
             extern volatile unsigned gR36ProfWindow;
-            gVitaStBk = (gR36ProfWindow & 1) == 0;
+            extern int gR36UbLim;
+            gVitaStBk = gR36ProfWindow % 3u == 2;
+            gR36UbLim = gR36ProfWindow % 3u != 0;
         }
         if (gVitaOptAb) {
             extern volatile unsigned gR36ProfWindow;
@@ -9351,6 +9357,7 @@ static void dpb_flush(int n, int slot, const uint16_t *const *src, const uint32_
     sDpbU[(slot - 1) * 4 + 2] = (float)n; /* (slot 0's range: how many slots hold parts) */
     ix = (uint16_t *)vglAllocFromScratch(total * 2);
     glUniform4fv(var->u[0], n * slot, sDpbU);
+    R36_UbLimit(var->u[0], n * slot); /* (only the slots in use copied) */
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     if (ix != NULL) {
         extern long R36_Stream(const void *data, size_t n);

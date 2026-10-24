@@ -1253,6 +1253,10 @@ static void read_settings(void) {
             extern int gVitaStBk, gVitaStBkAb;
             gVitaStBk = atoi(eq);
             gVitaStBkAb = 0;
+        } else if (strcmp(line, "ublim") == 0) { /* (TrimUI) 0: the batched parts' whole uniform block copied each draw */
+            extern int gR36UbLim, gVitaStBkAb;
+            gR36UbLim = atoi(eq);
+            gVitaStBkAb = 0;
         } else if (strcmp(line, "stbkab") == 0) { /* (TrimUI test build) 1: stbk on and off in turn, 10 s each */
             extern int gVitaStBkAb;
             gVitaStBkAb = atoi(eq);

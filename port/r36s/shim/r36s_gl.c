@@ -523,6 +523,7 @@ typedef struct Prog {
     uint32_t bsize[2];      /* the blocks' sizes (0: none) */
     uint8_t *shadow[2];     /* their contents as set */
     uint8_t dirty[2];
+    uint32_t lim[2];        /* (R36_UbLimit) bytes the next copy needs, 0: all */
     long boff[2];           /* where they are (for sStreamGen) */
     GLuint bbuf[2];         /* in which buffer */
     unsigned bgen[2];
@@ -1409,6 +1410,26 @@ void r36_glUniform4f(GLint loc, GLfloat a, GLfloat b, GLfloat c, GLfloat d) {
     LEAVE();
 }
 void r36_glUniform4fv(GLint loc, GLsizei count, const GLfloat *v) { ENTER(); if (!ub_set(loc, v, 16, count)) { p_glUniform4fv(loc, count, v); sEv |= 32; } LEAVE(); }
+/* the next copy of the member's block need only reach its element el + count (the shader reads no further this
+   draw): the rest of the block's members are copied still (the batched parts: their slots in use, not all 32) */
+void R36_UbLimit(GLint loc, int count) {
+    ENTER();
+    Prog *pr = (int)sCurProg < sProgCap ? &sProg[sCurProg] : NULL;
+    if (loc >= UB_LOC && pr != NULL && ((loc - UB_LOC) >> 12) < pr->nm) {
+        int mi = (loc - UB_LOC) >> 12, k;
+        UMem *m = &pr->m[mi];
+        uint32_t end = m->off + (uint32_t)((loc - UB_LOC) & 0xFFF) * m->stride + (uint32_t)count * m->stride;
+        for (k = 0; k < pr->nm; k++) {
+            if (k != mi && pr->m[k].blk == m->blk) {
+                uint32_t e = pr->m[k].off + (uint32_t)pr->m[k].n * pr->m[k].stride;
+                end = e > end ? e : end;
+            }
+        }
+        end = (end + 15u) & ~15u;
+        pr->lim[m->blk] = end < pr->bsize[m->blk] ? end : 0;
+    }
+    LEAVE();
+}
 static void prog_free(Prog *pr) {
     free(pr->shadow[0]);
     free(pr->shadow[1]);
@@ -1764,6 +1785,7 @@ unsigned gR36Ub[3]; /* (for the log) blocks put in place, ranges bound, bytes */
 static GLuint sUbRing2[3], sUbRing3;
 static uint8_t *sUbMap3;
 static unsigned sUbAt, sUbGen; /* (modes 2, 3: the place in this part; the part's generation as sStreamGen) */
+int gR36UbLim = 1; /* R36_UbLimit followed (bt3.txt ublim) */
 static void ub_bind(Prog *p) {
     int b, mode = gR36UbMode;
     if (sUbAlign == 0) {
@@ -1795,13 +1817,14 @@ static void ub_bind(Prog *p) {
         }
         if (p->dirty[b] || p->bgen[b] != sStreamGen * 8u + (unsigned)mode || p->boff[b] < 0) {
             long at = -1;
+            uint32_t cs = mode == 3 && p->lim[b] != 0 && gR36UbLim ? p->lim[b] : sz; /* (the bytes copied: the range bound is the whole block still) */
             unsigned part = sStreamPart;
             if (mode == 1) {
                 at = stream_put(p->shadow[b], sz, sUbAlign);
             } else if (mode == 2 || mode == 3) {
                 unsigned o = (sUbAt + sUbAlign - 1u) / sUbAlign * sUbAlign;
                 if (o + sz <= UB_PART) {
-                    sUbAt = o + sz;
+                    sUbAt = o + cs;
                     if (mode == 2) {
                         if (sUbRing2[part] == 0) {
                             p_glGenBuffers(1, &sUbRing2[part]);
@@ -1815,7 +1838,7 @@ static void ub_bind(Prog *p) {
                         at = (long)o;
                     } else {
                         at = (long)(part * UB_PART + o);
-                        memcpy(sUbMap3 + at, p->shadow[b], sz);
+                        memcpy(sUbMap3 + at, p->shadow[b], cs);
                     }
                 }
             }
@@ -1824,7 +1847,8 @@ static void ub_bind(Prog *p) {
             p->boff[b] = at;
             p->bbuf[b] = mode == 1 ? sStreamBuf : mode == 2 ? sUbRing2[part] : sUbRing3;
             gR36Ub[0]++;
-            gR36Ub[2] += sz;
+            gR36Ub[2] += cs;
+            p->lim[b] = 0;
             if (at < 0) { /* (mode 4, or no room: a buffer of its own given the copy) */
                 if (sUbFb[b] == 0) {
                     p_glGenBuffers(1, &sUbFb[b]);
