@@ -6524,14 +6524,10 @@ void GsGpu_FrameEnd(void) {
         if (gVitaGpuAb && !gVitaGsSkip) {
             extern volatile unsigned gR36ProfWindow;
             static int keepW, keepH;
-            unsigned k = gR36ProfWindow % 3u;
-            if (keepW == 0) {
-                keepW = gR36FightW;
-                keepH = gR36FightH;
-            }
-            gR36FightW = k == 1 ? 640 : keepW;
-            gR36FightH = k == 1 ? 368 : keepH;
-            gVitaFxMask = k == 2 ? 15 : 0;
+            static const int kMask[5] = {0, 1, 2, 4, 8}; /* (as set; without the table passes and fog; the glow; the work targets' effects; the outline) */
+            unsigned k = gR36ProfWindow % 5u;
+            (void)keepW; (void)keepH;
+            gVitaFxMask = kMask[k];
         }
         if (gVitaUbAb) {
             extern volatile unsigned gR36ProfWindow;

@@ -32,9 +32,9 @@ void R36_GameState(FILE *f) {
     }
     {
         extern int gVitaGpuAb;
-        static const char *kAb[3] = {"normal", "640x368", "effects off"};
+        static const char *kAb[5] = {"all effects", "no table passes/fog", "no glow", "no work-target effects", "no outline"};
         if (gVitaGpuAb) {
-            fprintf(f, "  GPU A/B in these 10 s: %s\n", kAb[gR36ProfWindow % 3u]);
+            fprintf(f, "  GPU A/B in these 10 s: %s\n", kAb[gR36ProfWindow % 5u]);
         }
     }
     extern int gVitaOptAb, gR36Opt;
