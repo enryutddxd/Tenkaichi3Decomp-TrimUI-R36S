@@ -67,12 +67,13 @@ LICENCIA / LICENSE
 El código del port está bajo la GNU Affero General Public License v3 (LICENSE.txt), igual que el port de Vita en
 que se basa; la parte anterior a ese cambio de licencia venía bajo MIT, cuyo aviso se conserva en LICENSE-MIT.txt.
 Esta versión está modificada respecto al port de Vita de arielxflores (ver créditos). Por la AGPL, el código
-fuente completo de esta versión está disponible para quien lo reciba; pídelo al autor del port (EnryuTG).
+fuente completo de esta versión está disponible para quien lo reciba:
+https://github.com/enryutddxd/Tenkaichi3Decomp-TrimUI
 El código del juego viene de la decompilación; los datos del juego, de tu propio disco. Este proyecto no está
 afiliado ni respaldado por los dueños del juego.
 
 The port code is under the GNU AGPL v3 (LICENSE.txt), as the Vita port it is built on; the earlier part came under
 MIT, whose notice is kept in LICENSE-MIT.txt. This version is modified from arielxflores' Vita port. Under the
-AGPL, the complete source code of this version is available to whoever receives it: ask the port's author
-(EnryuTG). The game's code comes from the decompilation; the game's data from your own disc. Not affiliated
+AGPL, the complete source code of this version is available to whoever receives it:
+https://github.com/enryutddxd/Tenkaichi3Decomp-TrimUI. The game's code comes from the decompilation; the game's data from your own disc. Not affiliated
 with or endorsed by the game's rights holders.

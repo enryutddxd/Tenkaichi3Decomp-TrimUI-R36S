@@ -1,3 +1,12 @@
+# Tenkaichi3Decomp for the TrimUI Smart Pro (and PS Vita)
+
+> **TrimUI Smart Pro port (stock firmware, PortMaster) by EnryuTG.** This fork adds a native 64-bit Linux port for
+> the TrimUI Smart Pro (`port/r36s`, `port/trimui`): an OpenGL ES layer for its PowerVR GPU, a render thread and
+> many optimisations; fights run at about 30 fps at 854x480. Download the zip from the
+> [releases page](https://github.com/enryutddxd/Tenkaichi3Decomp-TrimUI/releases) and see
+> [port/trimui/README.md](port/trimui/README.md). No game data included: you need your own USA disc (SLUS-21678).
+> Based on [arielxflores' PS Vita port](https://github.com/arielxflores/Tenkaichi3Decomp-Vita); its README follows.
+
 # Tenkaichi3Decomp for the PS Vita
 
 A native PS Vita port of **Dragon Ball Z: Budokai Tenkaichi 3** (PlayStation 2, USA release, SLUS-21678), based

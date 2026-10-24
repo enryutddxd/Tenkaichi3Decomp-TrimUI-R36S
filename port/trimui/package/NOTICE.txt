@@ -9,7 +9,8 @@ rights holders (Spike, Bandai Namco). No game data is included.
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General
 Public License as published by the Free Software Foundation, version 3. It is distributed WITHOUT ANY WARRANTY;
 see the full license text below. This version is a modified version of Tenkaichi3Decomp-Vita
-(https://github.com/arielxflores/Tenkaichi3Decomp-Vita). Third-party components: THIRD_PARTY.txt.
+(https://github.com/arielxflores/Tenkaichi3Decomp-Vita). The complete source code of this version:
+https://github.com/enryutddxd/Tenkaichi3Decomp-TrimUI. Third-party components: THIRD_PARTY.txt.
 
 ================================================================================================================
 
