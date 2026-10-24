@@ -2951,7 +2951,7 @@ static void apply_fixed(const State *s) {
    written, or blended with the source's alpha 0) and cover their rectangle whole: the picture's alpha cleared there
    (and the depth, with ZTST ALWAYS and its write, when all of it is one depth; and the stencil's copy of alpha bit 7)
    by a clear instead of two to eight screens drawn pixel by pixel a picture. bt3.txt aclear=0: drawn as before. */
-int gVitaAClear = 1;
+int gVitaAClear = 2; /* (2: one rectangle drawn; with the render thread the limit, cheaper than a partial clear: ~70 us each) */
 unsigned gVitaAClr[3]; /* (for the log) batches cleared, their sprites, batches looked at and drawn after all */
 static FlushIn sAcIn;
 static V sAcQ[6];

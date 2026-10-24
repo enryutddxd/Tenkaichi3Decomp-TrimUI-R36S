@@ -1910,8 +1910,21 @@ static void site_add(unsigned long long ns) {
         }
     }
 }
-static unsigned long long draw_t0(void) { return glt_now(); }
+/* (the draws timed only for prof.txt: R36_PROF=0, the release launcher, leaves out two clock reads a draw) */
+static int sDrawTimed = -1;
+static inline int draw_timed(void) {
+    if (sDrawTimed < 0) {
+        const char *e = getenv("R36_PROF");
+        sDrawTimed = !(e != NULL && atoi(e) == 0);
+    }
+    return sDrawTimed;
+}
+static unsigned long long draw_t0(void) { return draw_timed() ? glt_now() : 0; }
 static void draw_done(unsigned long long t0) {
+    if (!sDrawTimed) {
+        sEv = 0;
+        return;
+    }
     unsigned long long d = glt_now() - t0;
     site_add(d);
     unsigned e = sEv & (EV_N - 1);
