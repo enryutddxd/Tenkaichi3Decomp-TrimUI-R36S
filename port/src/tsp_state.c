@@ -35,7 +35,8 @@ void R36_GameState(FILE *f) {
         extern unsigned gVitaGlowReuse;
         static unsigned pr;
         if (gVitaGpuAb) {
-            fprintf(f, "  NEW (glow every other picture, discards) in these 10 s: %s | glows reused %u\n", gR36ProfWindow % 2u == 0 ? "ON" : "off", gVitaGlowReuse - pr);
+            static const char *kAb[6] = {"all effects", "no work-target effects", "no glow", "no table passes/fog", "no outline", "no effects"};
+            fprintf(f, "  EFFECTS A/B in these 10 s: %s | glows reused %u\n", kAb[gR36ProfWindow % 6u], gVitaGlowReuse - pr);
         }
         pr = gVitaGlowReuse;
     }

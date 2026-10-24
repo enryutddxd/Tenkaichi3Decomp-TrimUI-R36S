@@ -1313,7 +1313,7 @@ extern int gVitaSliver;
 int gVitaFxSweep;           /* the effects left out in turn, 60 pictures each, the chip's time logged by which */
 int gVitaFxAb = 0;          /* (TrimUI test build) see frame_begin */
 int gVitaGlowHalf = 1;      /* (see glow_exec) */
-int gVitaGpuAb = 0;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
+int gVitaGpuAb = 1;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
 int gVitaUbAb = 0;          /* (TrimUI test build) the uniform blocks' four ways in turn, 10 s each (r36s_gl.c gR36UbMode) */
 int gVitaOptAb = 0;         /* (TrimUI test build) the driver's ways of doing less (gR36Opt) off every other 10 s */
 int gVitaFxMask;            /* 1 the table passes, 2 the glow, 4 the work targets' effects, 8 the outline */
@@ -6688,11 +6688,9 @@ void GsGpu_FrameEnd(void) {
         if (gVitaGpuAb && !gVitaGsSkip) {
             extern volatile unsigned gR36ProfWindow;
             static int keepW, keepH;
-            extern int gR36DiscardAb;
-            unsigned k = gR36ProfWindow % 2u; /* (the glow every other picture and the discards: on, off) */
+            static const int kMask[6] = {0, 4, 2, 1, 8, 15}; /* (all; without the work targets' effects; the glow; the table passes and fog; the outline; none) */
             (void)keepW; (void)keepH;
-            gVitaGlowHalf = k == 0;
-            gR36DiscardAb = k == 0;
+            gVitaFxMask = kMask[gR36ProfWindow % 6u];
         }
         if (gVitaUbAb) {
             extern volatile unsigned gR36ProfWindow;
