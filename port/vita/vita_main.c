@@ -1240,6 +1240,8 @@ static void read_settings(void) {
         } else if (strcmp(line, "ubab") == 0) {
             extern int gVitaUbAb;
             gVitaUbAb = atoi(eq);
+        } else if (strcmp(line, "present") == 0) { /* (TrimUI) 0: the picture put on the screen by the render thread itself */
+            setenv("R36_PRESENT", eq, 1);
         } else if (strcmp(line, "ubo") == 0) { /* (TrimUI) 0: the shaders' uniforms as before (not in uniform blocks) */
             setenv("R36_UBO", eq, 1);
         } else if (strcmp(line, "bench") == 0) { /* (TrimUI) the driver's costs measured at start (r36s_bench.c) */

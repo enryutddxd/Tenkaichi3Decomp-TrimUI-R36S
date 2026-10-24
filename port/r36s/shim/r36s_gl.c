@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <dlfcn.h>
 #include "vitaGL.h"
 
 extern void Vita_Log(const char *fmt, ...);
@@ -66,6 +67,7 @@ extern void R36_LogLine(const char *fmt, ...);
     X(void, glVertexAttrib4f, (GLuint, GLfloat, GLfloat, GLfloat, GLfloat)) X(void, glViewport, (GLint, GLint, GLsizei, GLsizei)) \
     X(void, glBindVertexArray, (GLuint)) X(void *, glMapBufferRange, (GLenum, GLintptr, GLsizeiptr, GLbitfield)) X(GLboolean, glUnmapBuffer, (GLenum)) \
     X(void, glDrawElementsBaseVertex, (GLenum, GLsizei, GLenum, const void *, GLint)) \
+    X(void, glWaitSync, (GLsync, GLbitfield, GLuint64)) \
     X(void, glBindBufferRange, (GLenum, GLuint, GLuint, GLintptr, GLsizeiptr)) X(GLuint, glGetUniformBlockIndex, (GLuint, const GLchar *)) \
     X(void, glUniformBlockBinding, (GLuint, GLuint, GLuint)) X(void, glGetActiveUniformsiv, (GLuint, GLsizei, const GLuint *, GLenum, GLint *)) \
     X(void, glGetActiveUniformBlockiv, (GLuint, GLuint, GLenum, GLint *)) X(void, glGetAttachedShaders, (GLuint, GLsizei, GLsizei *, GLuint *)) \
@@ -203,6 +205,23 @@ void (*gR36CtxWake)(void);    /* (vita_vgl.c) the keeper asked to let go of it *
 unsigned long long gR36Ctx[4]; /* for the log: times taken, us waiting for it, us making it current, times given up */
 unsigned long long R36_NowNs(void);
 
+/* (the present thread, see present_*) the renderer's context made current without the window: the window's surface is the
+   present thread's */
+static int sPresentOn;
+static struct {
+    void *dpy, *ctx, *ctxP, *surf;
+    unsigned (*MakeCurrent)(void *, void *, void *, void *);
+    unsigned (*SwapBuffers)(void *, void *);
+    unsigned (*SwapInterval)(void *, int);
+} sE;
+static void present_init(void);
+static void ctx_current(int on) {
+    if (sPresentOn) {
+        sE.MakeCurrent(sE.dpy, NULL, NULL, on ? sE.ctx : NULL);
+    } else {
+        SDL_GL_MakeCurrent(sWin, on ? sCtx : NULL);
+    }
+}
 static void ctx_take(void) {
     struct timespec ts;
     int timedOut = 0;
@@ -232,14 +251,14 @@ static void ctx_take(void) {
     sCtxOwner = pthread_self();
     pthread_mutex_unlock(&sCtxLock);
     t1 = R36_NowNs();
-    SDL_GL_MakeCurrent(sWin, sCtx);
+    ctx_current(1);
     tHold = 1;
     gR36Ctx[0]++;
     gR36Ctx[1] += (t1 - t0) / 1000u;
     gR36Ctx[2] += (R36_NowNs() - t1) / 1000u;
 }
 static void ctx_give(void) {
-    SDL_GL_MakeCurrent(sWin, NULL);
+    ctx_current(0);
     tHold = 0;
     gR36Ctx[3]++;
     pthread_mutex_lock(&sCtxLock);
@@ -732,6 +751,7 @@ int R36_VideoInit(void) {
     }
     tHold = 1;
     sCtxHeld = 1;
+    present_init();
     ctx_give(); /* (taken by whichever thread draws) */
     return 1;
 }
@@ -1623,7 +1643,7 @@ static long stream_put(const void *data, size_t n, unsigned align) {
    1 the stream (persistent, coherent, also vertices and indices), 2 a buffer a part of its own written with
    glBufferSubData, 3 a persistent coherent buffer of its own, 4 one small buffer per block given the copy with
    glBufferData each time. */
-int gR36UbMode = 1;
+int gR36UbMode = 3;
 static struct { GLuint buf; long off; uint32_t size; } sUbBound[2] = {{0, -1, 0}, {0, -1, 0}};
 static GLuint sUbFb[2];
 static unsigned sUbAlign;
@@ -2054,6 +2074,238 @@ static void present_tex(GLuint tex, int w, int h, int flipped) {
     p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     SDL_GL_SwapWindow(sWin);
 }
+/* ---- the present thread ----
+   Putting a finished picture on the screen (drawing it onto the window, the swap, which waits for the GPU and for the
+   display's blank) took the render thread 2 to 15 ms a picture, every picture, while nothing else was drawn. Here a
+   thread of its own with a context of its own (sharing the renderer's objects) owns the window: the render thread
+   hands it the display buffer and a fence, and goes on with the next picture in the next buffer (three of them).
+   Before a buffer is drawn into again, the GPU waits for its showing to have read it. R36_PRESENT=0: as before. */
+enum { PB_FREE, PB_QUEUED, PB_SHOWING };
+static pthread_mutex_t sPrLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t sPrCond = PTHREAD_COND_INITIALIZER;
+static struct { int state; GLsync ready, read; } sPb[NDISP + 1]; /* (NDISP: the text screen's texture) */
+static struct { int buf; GLuint tex; int w, h; float aspect; GLsync ready; } sPrJob[NDISP + 1];
+static int sPrQ[NDISP + 1], sPrQn; /* the order of the queued */
+static volatile int sPrBusy;
+unsigned gR36Present[3]; /* (for the log) shown, dropped (a newer one came first), render thread waits for a showing */
+static void *present_thread(void *arg) {
+    static const float kQuad[8] = {-1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f};
+    GLuint prog;
+    GLint uR, uT;
+    (void)arg;
+    pthread_setname_np(pthread_self(), "r36_present");
+    if (!sE.MakeCurrent(sE.dpy, sE.surf, sE.surf, sE.ctxP)) {
+        R36_LogLine("r36 gl: the present thread's context not made current\n");
+        return NULL;
+    }
+    if (sE.SwapInterval != NULL) {
+        sE.SwapInterval(sE.dpy, gR36Vsync);
+    }
+    prog = mk_prog(kPresentVert, kPresentFrag);
+    uR = p_glGetUniformLocation(prog, "uR");
+    uT = p_glGetUniformLocation(prog, "uTex");
+    p_glUseProgram(prog);
+    p_glUniform1i(uT, 0);
+    p_glDisable(GL_DEPTH_TEST);
+    p_glDisable(GL_BLEND);
+    p_glDisable(GL_SCISSOR_TEST);
+    p_glBindBuffer(GL_ARRAY_BUFFER, 0);
+    p_glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, kQuad);
+    p_glEnableVertexAttribArray(0);
+    p_glActiveTexture(GL_TEXTURE0);
+    for (;;) {
+        int b, k;
+        float a, sw = 1.0f, sh = 1.0f;
+        typeof(sPrJob[0]) j;
+        pthread_mutex_lock(&sPrLock);
+        while (sPrQn == 0) {
+            sPrBusy = 0;
+            pthread_cond_broadcast(&sPrCond);
+            pthread_cond_wait(&sPrCond, &sPrLock);
+        }
+        sPrBusy = 1;
+        b = sPrQ[0];
+        for (k = 1; k < sPrQn; k++) {
+            sPrQ[k - 1] = sPrQ[k];
+        }
+        sPrQn--;
+        j = sPrJob[b];
+        sPb[b].state = PB_SHOWING;
+        pthread_mutex_unlock(&sPrLock);
+        if (j.ready != NULL) {
+            p_glWaitSync(j.ready, 0, GL_TIMEOUT_IGNORED);
+            p_glDeleteSync(j.ready);
+        }
+        a = j.aspect > 0.0f ? j.aspect : (float)j.w / (float)j.h;
+        if ((float)sWinW / (float)sWinH > a) {
+            sw = a * (float)sWinH / (float)sWinW;
+        } else {
+            sh = (float)sWinW / a / (float)sWinH;
+        }
+        p_glViewport(0, 0, sWinW, sWinH);
+        p_glClearColor(0, 0, 0, 1);
+        p_glClear(GL_COLOR_BUFFER_BIT);
+        p_glUniform4f(uR, sw, sh, 0.0f, 0.0f);
+        p_glBindTexture(GL_TEXTURE_2D, j.tex);
+        p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        p_glBindTexture(GL_TEXTURE_2D, 0);
+        {
+            GLsync rd = p_glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            p_glFlush();
+            pthread_mutex_lock(&sPrLock);
+            sPb[b].read = rd; /* (the buffer may be drawn into again once the GPU is past this) */
+            pthread_cond_broadcast(&sPrCond);
+            pthread_mutex_unlock(&sPrLock);
+        }
+        sE.SwapBuffers(sE.dpy, sE.surf);
+        gR36Present[0]++;
+    }
+    return NULL;
+}
+/* (the render context's thread, at start) the window given to the present thread */
+static void present_init(void) {
+    void *egl = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
+    void *(*GetDisplay)(void), *(*GetContext)(void), *(*GetSurface)(int);
+    void *(*CreateContext)(void *, void *, void *, const int *);
+    unsigned (*QueryContext)(void *, void *, int, int *), (*ChooseConfig)(void *, const int *, void **, int, int *);
+    const char *(*QueryString)(void *, int);
+    const char *e = getenv("R36_PRESENT");
+    static const int kCtx[] = {0x3098, 3, 0x3038};
+    int id = 0, n = 0;
+    void *cfg = NULL;
+    pthread_t th;
+    if (e != NULL && atoi(e) == 0) {
+        return;
+    }
+    if (egl == NULL) {
+        egl = dlopen("libEGL.so.1", RTLD_NOW | RTLD_NOLOAD);
+    }
+    if (egl == NULL) {
+        egl = RTLD_DEFAULT;
+    }
+#define S(v, nm) *(void **)&v = dlsym(egl, nm)
+    S(GetDisplay, "eglGetCurrentDisplay"); S(GetContext, "eglGetCurrentContext"); S(GetSurface, "eglGetCurrentSurface");
+    S(CreateContext, "eglCreateContext"); S(QueryContext, "eglQueryContext"); S(ChooseConfig, "eglChooseConfig");
+    S(QueryString, "eglQueryString"); S(sE.MakeCurrent, "eglMakeCurrent"); S(sE.SwapBuffers, "eglSwapBuffers");
+    S(sE.SwapInterval, "eglSwapInterval");
+#undef S
+    if (GetDisplay == NULL || GetContext == NULL || GetSurface == NULL || CreateContext == NULL || QueryContext == NULL ||
+        ChooseConfig == NULL || sE.MakeCurrent == NULL || sE.SwapBuffers == NULL || p_glWaitSync == NULL || p_glFenceSync == NULL) {
+        R36_LogLine("r36 gl: no present thread (EGL calls missing)\n");
+        return;
+    }
+    sE.dpy = GetDisplay();
+    if (QueryString == NULL || strstr(QueryString(sE.dpy, 0x3055), "EGL_KHR_surfaceless_context") == NULL) {
+        R36_LogLine("r36 gl: no present thread (no surfaceless contexts)\n");
+        return;
+    }
+    sE.ctx = GetContext();
+    sE.surf = GetSurface(0x3059 /* EGL_DRAW */);
+    QueryContext(sE.dpy, sE.ctx, 0x3028, &id);
+    {
+        int a[] = {0x3028, id, 0x3038};
+        ChooseConfig(sE.dpy, a, &cfg, 1, &n);
+    }
+    sE.ctxP = n > 0 ? CreateContext(sE.dpy, cfg, sE.ctx, kCtx) : NULL;
+    if (sE.ctxP == NULL || sE.surf == NULL) {
+        R36_LogLine("r36 gl: no present thread (no second context)\n");
+        return;
+    }
+    p_glFinish();
+    if (!sE.MakeCurrent(sE.dpy, NULL, NULL, sE.ctx)) { /* (this context without the window from now on) */
+        R36_LogLine("r36 gl: no present thread (the context not current without the window)\n");
+        sE.MakeCurrent(sE.dpy, sE.surf, sE.surf, sE.ctx);
+        return;
+    }
+    sPresentOn = 1;
+    r_forget();
+    pthread_create(&th, NULL, present_thread, NULL);
+    pthread_detach(th);
+    R36_LogLine("r36 gl: pictures put on the screen by a thread of their own\n");
+}
+/* (render context) buffer b handed over to be shown; anything older queued and not taken yet is dropped */
+static void present_post(int b, GLuint tex, int w, int h, float aspect) {
+    GLsync f = p_glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    int k;
+    p_glFlush();
+    pthread_mutex_lock(&sPrLock);
+    for (k = 0; k < sPrQn; k++) { /* (a newer picture: the older ones not shown) */
+        int o = sPrQ[k];
+        if (sPrJob[o].ready != NULL) {
+            p_glDeleteSync(sPrJob[o].ready);
+            sPrJob[o].ready = NULL;
+        }
+        sPb[o].state = PB_FREE;
+        gR36Present[1]++;
+    }
+    sPrQn = 0;
+    sPrJob[b].buf = b;
+    sPrJob[b].tex = tex;
+    sPrJob[b].w = w;
+    sPrJob[b].h = h;
+    sPrJob[b].aspect = aspect;
+    sPrJob[b].ready = f;
+    sPb[b].state = PB_QUEUED;
+    if (sPb[b].read != NULL) { /* (an older showing's fence, waited for before: not needed) */
+        p_glDeleteSync(sPb[b].read);
+        sPb[b].read = NULL;
+    }
+    sPrQ[sPrQn++] = b;
+    pthread_cond_broadcast(&sPrCond);
+    pthread_mutex_unlock(&sPrLock);
+}
+/* (render context) buffer b about to be drawn into: not while it is shown */
+static void present_claim(int b) {
+    GLsync rd = NULL;
+    pthread_mutex_lock(&sPrLock);
+    if (sPb[b].state == PB_QUEUED) { /* (never taken: dropped) */
+        int k, m = 0;
+        for (k = 0; k < sPrQn; k++) {
+            if (sPrQ[k] != b) {
+                sPrQ[m++] = sPrQ[k];
+            }
+        }
+        sPrQn = m;
+        if (sPrJob[b].ready != NULL) {
+            p_glDeleteSync(sPrJob[b].ready);
+            sPrJob[b].ready = NULL;
+        }
+        gR36Present[1]++;
+    } else if (sPb[b].state == PB_SHOWING) {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += 1;
+        while (sPb[b].read == NULL) { /* (being drawn onto the window right now: a moment) */
+            gR36Present[2]++;
+            if (pthread_cond_timedwait(&sPrCond, &sPrLock, &ts) != 0) {
+                break;
+            }
+        }
+        rd = sPb[b].read;
+        sPb[b].read = NULL;
+    }
+    sPb[b].state = PB_FREE;
+    pthread_mutex_unlock(&sPrLock);
+    if (rd != NULL) {
+        p_glWaitSync(rd, 0, GL_TIMEOUT_IGNORED); /* (the GPU waits, not this thread) */
+        p_glDeleteSync(rd);
+    }
+}
+/* (render context) everything handed over shown (before the buffers are made again) */
+static void present_drain(void) {
+    int b;
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += 1; /* (a present thread that is gone: not waited for forever) */
+    pthread_mutex_lock(&sPrLock);
+    while ((sPrQn > 0 || sPrBusy) && pthread_cond_timedwait(&sPrCond, &sPrLock, &ts) == 0) {
+    }
+    pthread_mutex_unlock(&sPrLock);
+    for (b = 0; b <= NDISP; b++) {
+        present_claim(b);
+    }
+    p_glFinish();
+}
 /* everything present_tex changed, back as the renderer had it */
 static void state_restore(void) {
     p_glClearColor(0, 0, 0, 1);
@@ -2098,7 +2350,11 @@ void vglSwapBuffers(GLboolean has_commondialog) {
         unsigned long long t0 = sceKernelGetProcessTimeWide(), t1;
         static unsigned long long sumPresent, sumBetween, last;
         static unsigned n, up0, up1;
-        present_tex(sDispTex[done], sDispW, sDispH, 1);
+        if (sPresentOn) {
+            present_post((int)done, sDispTex[done], sDispW, sDispH, sAspect);
+        } else {
+            present_tex(sDispTex[done], sDispW, sDispH, 1);
+        }
         t1 = sceKernelGetProcessTimeWide();
         sumPresent += t1 - t0;
         if (last != 0) {
@@ -2124,10 +2380,18 @@ void vglSwapBuffers(GLboolean has_commondialog) {
     gxm_back_buffer_index = (done + 1) % NDISP;
     sScratchAt = 0;
     if (sNewW > 0 && (sNewW != sDispW || sNewH != sDispH)) {
+        if (sPresentOn) {
+            present_drain();
+        }
         disp_alloc(sNewW, sNewH);
     }
     sNewW = sNewH = 0;
-    state_restore();
+    if (sPresentOn) {
+        present_claim((int)gxm_back_buffer_index); /* (drawn into next) */
+        bind_target();
+    } else {
+        state_restore();
+    }
     LEAVE();
 }
 
@@ -2151,7 +2415,12 @@ void R36_TextPresent(const uint32_t *px, int w, int h) {
     p_glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     p_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
     p_glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    {
+    if (sPresentOn) { /* (by the present thread, twice: both buffers of the window) */
+        present_post(NDISP, sTextTex, w, h, (float)w / (float)h);
+        present_drain();
+        present_post(NDISP, sTextTex, w, h, (float)w / (float)h);
+        present_drain();
+    } else {
         float keep = sAspect;
         sAspect = (float)w / (float)h;
         present_tex(sTextTex, w, h, 1);

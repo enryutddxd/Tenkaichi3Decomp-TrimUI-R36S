@@ -1,3 +1,4 @@
+#include <string.h>
 /*
  * (R36S / TrimUI test builds) A few of the game's own variables, for prof.txt's report every 10 s
  * (port/r36s/shim/r36s_prof.c): where the boot-time flows stand when the game seems to wait for nothing.
@@ -23,6 +24,12 @@ void R36_GameState(FILE *f) {
     fprintf(f, "  UBMODE in these 10 s: %d%s | blocks put %u, ranges bound %u, KB %u\n", gVitaUbAb ? 1 + (int)(gR36ProfWindow % 4u) : gR36UbMode,
             gVitaUbAb ? " (A/B)" : "", gR36Ub[0] - prevUb[0], gR36Ub[1] - prevUb[1], (gR36Ub[2] - prevUb[2]) >> 10);
     prevUb[0] = gR36Ub[0]; prevUb[1] = gR36Ub[1]; prevUb[2] = gR36Ub[2];
+    {
+        extern unsigned gR36Present[3];
+        static unsigned pp[3];
+        fprintf(f, "  present thread: %u shown, %u dropped, %u waits\n", gR36Present[0] - pp[0], gR36Present[1] - pp[1], gR36Present[2] - pp[2]);
+        memcpy(pp, gR36Present, sizeof(pp));
+    }
     extern int gVitaOptAb, gR36Opt;
     if (gVitaOptAb) {
         fprintf(f, "  OPT in these 10 s: %s\n", (gR36ProfWindow & 1) ? "off (A/B)" : "ON (A/B)");
