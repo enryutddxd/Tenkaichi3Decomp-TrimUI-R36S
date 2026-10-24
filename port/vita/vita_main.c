@@ -1233,6 +1233,13 @@ static void read_settings(void) {
             if (sscanf(eq, "%dx%d", &w, &h) == 2 && w >= 160 && h >= 120 && w <= 1920 && h <= 1080) {
                 if (line[0] == 'r') { gR36FightW = w; gR36FightH = h; } else { gR36MenuW = w; gR36MenuH = h; }
             }
+        } else if (strcmp(line, "ubmode") == 0) { /* (TrimUI) where the uniform blocks go: 1..4 (r36s_gl.c ub_bind); no A/B */
+            extern int gR36UbMode, gVitaUbAb;
+            gR36UbMode = atoi(eq);
+            gVitaUbAb = 0;
+        } else if (strcmp(line, "ubab") == 0) {
+            extern int gVitaUbAb;
+            gVitaUbAb = atoi(eq);
         } else if (strcmp(line, "ubo") == 0) { /* (TrimUI) 0: the shaders' uniforms as before (not in uniform blocks) */
             setenv("R36_UBO", eq, 1);
         } else if (strcmp(line, "bench") == 0) { /* (TrimUI) the driver's costs measured at start (r36s_bench.c) */

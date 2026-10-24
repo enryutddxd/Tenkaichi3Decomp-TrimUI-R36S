@@ -17,6 +17,12 @@ extern int32_t GPTR gMcFlow;
 void R36_GameState(FILE *f) {
     extern volatile unsigned gR36ProfWindow;
     extern int gVitaFxAb;
+    extern int gVitaUbAb, gR36UbMode;
+    extern unsigned gR36Ub[3];
+    static unsigned prevUb[3];
+    fprintf(f, "  UBMODE in these 10 s: %d%s | blocks put %u, ranges bound %u, KB %u\n", gVitaUbAb ? 1 + (int)(gR36ProfWindow % 4u) : gR36UbMode,
+            gVitaUbAb ? " (A/B)" : "", gR36Ub[0] - prevUb[0], gR36Ub[1] - prevUb[1], (gR36Ub[2] - prevUb[2]) >> 10);
+    prevUb[0] = gR36Ub[0]; prevUb[1] = gR36Ub[1]; prevUb[2] = gR36Ub[2];
     extern int gVitaOptAb, gR36Opt;
     if (gVitaOptAb) {
         fprintf(f, "  OPT in these 10 s: %s\n", (gR36ProfWindow & 1) ? "off (A/B)" : "ON (A/B)");

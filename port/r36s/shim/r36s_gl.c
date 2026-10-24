@@ -500,7 +500,8 @@ typedef struct Prog {
     uint32_t bsize[2];      /* the blocks' sizes (0: none) */
     uint8_t *shadow[2];     /* their contents as set */
     uint8_t dirty[2];
-    long boff[2];           /* where the stream has them (for sStreamGen) */
+    long boff[2];           /* where they are (for sStreamGen) */
+    GLuint bbuf[2];         /* in which buffer */
     unsigned bgen[2];
     int nm;
     UMem m[UB_MAXM];
@@ -1617,31 +1618,82 @@ static long stream_put(const void *data, size_t n, unsigned align) {
     gR36Up[2] += (unsigned)n;
     return at;
 }
-/* (before a draw) the current program's blocks: a changed copy into the stream, its range bound */
-static struct { long off; uint32_t size; } sUbBound[2] = {{-1, 0}, {-1, 0}};
+/* (before a draw) the current program's blocks: a changed copy put where the GPU reads it, its range bound.
+   Where (gR36UbMode; bt3.txt ubmode, ubab: every 10 s the next one, prof.txt says which):
+   1 the stream (persistent, coherent, also vertices and indices), 2 a buffer a part of its own written with
+   glBufferSubData, 3 a persistent coherent buffer of its own, 4 one small buffer per block given the copy with
+   glBufferData each time. */
+int gR36UbMode = 1;
+static struct { GLuint buf; long off; uint32_t size; } sUbBound[2] = {{0, -1, 0}, {0, -1, 0}};
 static GLuint sUbFb[2];
 static unsigned sUbAlign;
-unsigned gR36Ub[3]; /* (for the log) blocks put into the stream, ranges bound, bytes */
+unsigned gR36Ub[3]; /* (for the log) blocks put in place, ranges bound, bytes */
+#define UB_PART (1u << 20)
+static GLuint sUbRing2[3], sUbRing3;
+static uint8_t *sUbMap3;
+static unsigned sUbAt, sUbGen; /* (modes 2, 3: the place in this part; the part's generation as sStreamGen) */
 static void ub_bind(Prog *p) {
-    int b;
+    int b, mode = gR36UbMode;
     if (sUbAlign == 0) {
         GLint a = 0;
         p_glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &a);
         sUbAlign = a > 16 ? (unsigned)a : 16u;
+        R36_LogLine("r36 gl: uniform buffers aligned to %u bytes\n", sUbAlign);
+    }
+    if (sUbGen != sStreamGen) {
+        sUbGen = sStreamGen;
+        sUbAt = 0;
+    }
+    if (mode == 3 && sUbRing3 == 0 && p_glBufferStorageEXT != NULL) {
+        p_glGenBuffers(1, &sUbRing3);
+        p_glBindBuffer(GL_UNIFORM_BUFFER, sUbRing3);
+        p_glBufferStorageEXT(GL_UNIFORM_BUFFER, UB_PART * 3, NULL, GL_MAP_WRITE_BIT | 0x0040 | 0x0080);
+        sUbMap3 = (uint8_t *)p_glMapBufferRange(GL_UNIFORM_BUFFER, 0, UB_PART * 3, GL_MAP_WRITE_BIT | 0x0040 | 0x0080);
+        p_glBindBuffer(GL_UNIFORM_BUFFER, 0);
+        R36_LogLine("r36 gl: uniform ring (mode 3) %s\n", sUbMap3 != NULL ? "mapped" : "NOT mapped");
+    }
+    if (mode == 3 && sUbMap3 == NULL) {
+        mode = 2;
     }
     for (b = 0; b < 2; b++) {
         uint32_t sz = p->bsize[b];
+        GLuint buf = 0;
         if (sz == 0) {
             continue;
         }
-        if (p->dirty[b] || p->bgen[b] != sStreamGen || p->boff[b] < 0) {
-            long at = stream_put(p->shadow[b], sz, sUbAlign);
+        if (p->dirty[b] || p->bgen[b] != sStreamGen * 8u + (unsigned)mode || p->boff[b] < 0) {
+            long at = -1;
+            unsigned part = sStreamPart;
+            if (mode == 1) {
+                at = stream_put(p->shadow[b], sz, sUbAlign);
+            } else if (mode == 2 || mode == 3) {
+                unsigned o = (sUbAt + sUbAlign - 1u) / sUbAlign * sUbAlign;
+                if (o + sz <= UB_PART) {
+                    sUbAt = o + sz;
+                    if (mode == 2) {
+                        if (sUbRing2[part] == 0) {
+                            p_glGenBuffers(1, &sUbRing2[part]);
+                            p_glBindBuffer(GL_UNIFORM_BUFFER, sUbRing2[part]);
+                            p_glBufferData(GL_UNIFORM_BUFFER, UB_PART, NULL, GL_DYNAMIC_DRAW);
+                        } else {
+                            p_glBindBuffer(GL_UNIFORM_BUFFER, sUbRing2[part]);
+                        }
+                        p_glBufferSubData(GL_UNIFORM_BUFFER, o, sz, p->shadow[b]);
+                        p_glBindBuffer(GL_UNIFORM_BUFFER, 0);
+                        at = (long)o;
+                    } else {
+                        at = (long)(part * UB_PART + o);
+                        memcpy(sUbMap3 + at, p->shadow[b], sz);
+                    }
+                }
+            }
             p->dirty[b] = 0;
-            p->bgen[b] = sStreamGen;
+            p->bgen[b] = sStreamGen * 8u + (unsigned)mode;
             p->boff[b] = at;
+            p->bbuf[b] = mode == 1 ? sStreamBuf : mode == 2 ? sUbRing2[part] : sUbRing3;
             gR36Ub[0]++;
             gR36Ub[2] += sz;
-            if (at < 0) { /* (no room: a buffer of its own, given the copy) */
+            if (at < 0) { /* (mode 4, or no room: a buffer of its own given the copy) */
                 if (sUbFb[b] == 0) {
                     p_glGenBuffers(1, &sUbFb[b]);
                 }
@@ -1650,13 +1702,15 @@ static void ub_bind(Prog *p) {
                 p_glBindBuffer(GL_UNIFORM_BUFFER, 0);
                 p_glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)b, sUbFb[b], 0, sz);
                 sUbBound[b].off = -1;
-                p->dirty[b] = 1; /* (next time into the stream again) */
+                p->dirty[b] = 1; /* (next time again) */
                 gR36Ub[1]++;
                 continue;
             }
         }
-        if (sUbBound[b].off != p->boff[b] || sUbBound[b].size != sz) {
-            p_glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)b, sStreamBuf, p->boff[b], sz);
+        buf = p->bbuf[b];
+        if (sUbBound[b].buf != buf || sUbBound[b].off != p->boff[b] || sUbBound[b].size != sz) {
+            p_glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)b, buf, p->boff[b], sz);
+            sUbBound[b].buf = buf;
             sUbBound[b].off = p->boff[b];
             sUbBound[b].size = sz;
             gR36Ub[1]++;
