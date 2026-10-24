@@ -53,8 +53,11 @@ void R36_GameState(FILE *f) {
         memcpy(pq, gR36Pool, sizeof(pq));
     }
     {
-        extern unsigned gVitaPsw[4];
-        static unsigned pw[4];
+        extern unsigned gVitaPsw[4], gVitaStBkN;
+        extern int gVitaStBk, gVitaStBkAb;
+        static unsigned pw[4], pn;
+        fprintf(f, "  stage strips on the batched program: %s%s, %u draws\n", gVitaStBk ? "on" : "off", gVitaStBkAb ? " (A/B, 10 s each)" : "", gVitaStBkN - pn);
+        pn = gVitaStBkN;
         fprintf(f, "  program changes: %u; GS <-> parts, same pixel shader %u, differing only by 16/64/1024 %u; within one side %u\n",
                 gVitaPsw[0] - pw[0], gVitaPsw[1] - pw[1], gVitaPsw[2] - pw[2], gVitaPsw[3] - pw[3]);
         memcpy(pw, gVitaPsw, sizeof(pw));
@@ -74,7 +77,7 @@ void R36_GameState(FILE *f) {
                 }
                 fprintf(f, " %u:%x>%u:%x %u;", gVitaPswPair[best][0] >> 28, (gVitaPswPair[best][0] >> 16) & 0xFFF, (gVitaPswPair[best][0] >> 12) & 15,
                         gVitaPswPair[best][0] & 0xFFF, gVitaPswPair[best][1]);
-                gVitaPswPair[best][1] = 0x80000000u; /* (printed) */
+                gVitaPswPair[best][1] = 0; /* (printed) */
             }
             fprintf(f, "\n");
             memset(gVitaPswPair, 0, sizeof(gVitaPswPair));

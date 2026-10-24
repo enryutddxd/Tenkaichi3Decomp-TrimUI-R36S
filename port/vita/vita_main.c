@@ -1249,6 +1249,13 @@ static void read_settings(void) {
         } else if (strcmp(line, "ubab") == 0) {
             extern int gVitaUbAb;
             gVitaUbAb = atoi(eq);
+        } else if (strcmp(line, "stbk") == 0) { /* (TrimUI) 0: the stage's GS-way strips with their own program, as before */
+            extern int gVitaStBk, gVitaStBkAb;
+            gVitaStBk = atoi(eq);
+            gVitaStBkAb = 0;
+        } else if (strcmp(line, "stbkab") == 0) { /* (TrimUI test build) 1: stbk on and off in turn, 10 s each */
+            extern int gVitaStBkAb;
+            gVitaStBkAb = atoi(eq);
         } else if (strcmp(line, "gpuab") == 0) { /* (TrimUI test build) 0: no turns of 640 x 368 and effects off */
             extern int gVitaGpuAb;
             gVitaGpuAb = atoi(eq);

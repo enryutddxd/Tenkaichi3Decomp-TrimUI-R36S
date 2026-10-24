@@ -442,6 +442,8 @@ typedef struct Variant { GLuint prog; GLint test, tex, u[6]; int bk; /* (R36S: a
 /* (for the log) the program changes: all; between kinds (the GS's, the parts') with the same pixel shader flags; with
    the flags differing only by 16/64/1024 (the GS's own vertex shader variants); within one kind */
 unsigned gVitaPsw[4];
+int gVitaStBk = 1, gVitaStBkAb = 1; /* the stage's GS-way strips with the batched program (bt3.txt stbk, stbkab: in turn) */
+unsigned gVitaStBkN;
 static int sPswKind = -1, sPswFlags = -1;
 unsigned gVitaPswPair[64][2]; /* (for the log) the commonest changes: (from kind << 12 | flags) << 16 | (to ...), count */
 static int sPswFull = -1;
@@ -2411,6 +2413,7 @@ typedef struct FlushIn {
     const float *ft, *ftSlots; /* kind 2: 80 floats; 48 per place taken */
 } FlushIn;
 static void flush_impl(const FlushIn *in);
+static uint32_t sDpUSize[2];      /* bytes of a uniform block: fighters, stage */
 static void flush_run(const FlushIn *in);
 static void rt_put_draw(const FlushIn *in);
 static int sRtOn;
@@ -3207,7 +3210,17 @@ static void flush_impl(const FlushIn *in) {
             vf |= 1024; /* the colour scaled by its own alpha (up to 2) here, the blend's source factor one */
         }
         sPremul = (vf & 1024) != 0;
-        const Variant *var = (gVglSafe & 32768) ? NULL : variant(in->kind == 1 ? 1 : in->kind == 2 ? 2 : 0, vf);
+        const Variant *var = NULL;
+#ifdef PORT_R36S
+        /* the stage's strips drawn the GS's way (not planned) with the batched direct path's stage program: the
+           same transform (kVertStage = kVertStD), one slot taking every vertex. The two had alternated, a
+           program change each (v47: about half of them in the heavy stretches) */
+        if (in->kind == 1 && gVitaStBk && !(gVglSafe & 32768) && sVsKind[6] != 0 && sDpUSize[1] == 6u * 16u) {
+            var = variant(6, vf);
+        }
+        if (var == NULL)
+#endif
+        var = (gVglSafe & 32768) ? NULL : variant(in->kind == 1 ? 1 : in->kind == 2 ? 2 : 0, vf);
         if (var == NULL) {
             sPremul = 0;
         }
@@ -3218,7 +3231,7 @@ static void flush_impl(const FlushIn *in) {
                 glUseProgram(var->prog);
                 sGlc.prog = var->prog;
                 psw_note(in->kind == 0 ? 0 : 1, vf);
-                psw_pair(in->kind << 12 | (vf & 0xFFF));
+                psw_pair((var->bk ? 6 : in->kind) << 12 | (vf & 0xFFF));
             }
             if (fm) {
                 int tp = lin | s->wrapS << 1 | s->wrapT << 2;
@@ -3282,8 +3295,19 @@ static void flush_impl(const FlushIn *in) {
         if (in->kind == 1) { /* the stage's strips: vertices already on the chip, one matrix for the batch */
             const float *m = in->stageM;
             int k;
-            for (k = 0; k < 6; k++) {
-                glUniform4fv(sVarUse != NULL ? sVarUse->u[k] : sStU[k], 1, &m[k * 4]);
+#ifdef PORT_R36S
+            if (sVarUse != NULL && sVarUse->bk) { /* (the batched program: slot 0, its range every vertex) */
+                float b[DPB_ST_SLOT * 4];
+                memcpy(b, m, 24 * sizeof(float));
+                b[24] = -1.0f; b[25] = 1e30f; b[26] = 1.0f; b[27] = 0.0f;
+                glUniform4fv(sVarUse->u[0], DPB_ST_SLOT, b);
+                gVitaStBkN++;
+            } else
+#endif
+            {
+                for (k = 0; k < 6; k++) {
+                    glUniform4fv(sVarUse != NULL ? sVarUse->u[k] : sStU[k], 1, &m[k * 4]);
+                }
             }
             glBindBuffer(GL_ARRAY_BUFFER, sStageVbo);
             glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 32, (const void *)0);
@@ -6821,6 +6845,10 @@ void GsGpu_FrameEnd(void) {
             extern volatile unsigned gR36ProfWindow;
             extern int gR36UbMode;
             gR36UbMode = 1 + (int)(gR36ProfWindow % 4u);
+        }
+        if (gVitaStBkAb) {
+            extern volatile unsigned gR36ProfWindow;
+            gVitaStBk = (gR36ProfWindow & 1) == 0;
         }
         if (gVitaOptAb) {
             extern volatile unsigned gR36ProfWindow;
