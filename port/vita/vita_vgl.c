@@ -1324,7 +1324,7 @@ int gVitaFxSweep;           /* the effects left out in turn, 60 pictures each, t
 int gVitaFxAb = 0;          /* (TrimUI test build) see frame_begin */
 int gVitaGlowHalf = 1;      /* (see glow_exec) */
 extern int gVitaAClear;
-int gVitaGpuAb = 1;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
+int gVitaGpuAb = 0;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
 int gVitaUbAb = 0;          /* (TrimUI test build) the uniform blocks' four ways in turn, 10 s each (r36s_gl.c gR36UbMode) */
 int gVitaOptAb = 0;         /* (TrimUI test build) the driver's ways of doing less (gR36Opt) off every other 10 s */
 #ifdef PORT_TSP /* (the TrimUI: the work targets' effects and the glow off by default: ~25 -> ~29.5 fps in a fight at 854 x 480, the
@@ -2527,6 +2527,25 @@ static volatile int sRtGiveCtx; /* the drawing thread wants the context the rend
 #else
 #define R36_CTX_RELEASE() ((void)0)
 #endif
+/* (the drawing thread waiting for the render thread) a moment's spin, then short sleeps: spinning for whole pictures
+   took a core (the TrimUI has four: the render thread, the game's threads and the sound's lost time to it, and
+   the sound's device ran dry) */
+#ifdef PORT_R36S
+#include <time.h>
+static inline void rt_pause(unsigned *n) {
+    if (++*n < 200u) {
+        __asm__ volatile("yield");
+    } else {
+        struct timespec ts = {0, 100000}; /* (0.1 ms) */
+        nanosleep(&ts, NULL);
+    }
+}
+#else
+static inline void rt_pause(unsigned *n) {
+    (void)n;
+    __asm__ volatile("yield");
+}
+#endif
 static uint8_t *rt_reserve(uint32_t op, uint32_t bytes) {
     uint32_t total = a16(bytes + (uint32_t)sizeof(RtHdr)), off = sRtW & (RT_RING - 1), pad = off + total > RT_RING ? RT_RING - off : 0;
     RtHdr *h;
@@ -2534,8 +2553,9 @@ static uint8_t *rt_reserve(uint32_t op, uint32_t bytes) {
         unsigned long long t0 = sceKernelGetProcessTimeWide();
         R36_CTX_RELEASE(); /* (the render thread needs it to make room) */
         gVitaDrawWhere = 2;
+        unsigned pz = 0;
         while (sRtW + pad + total - sRtTail > RT_RING) {
-            __asm__ volatile("yield");
+            rt_pause(&pz);
         }
         gVitaDrawWhere = 0;
         gVitaRt[4]++;
@@ -2584,6 +2604,7 @@ static void rt_sync(void) {
     if (sRtOn && sRtTail != sRtW) {
         unsigned long long t0 = sceKernelGetProcessTimeWide();
         uint32_t lastTail = sRtTail, spins = 0;
+        unsigned pz = 0;
         unsigned long long moved = t0;
         gVitaDrawWhere = 1;
         R36_CTX_RELEASE();
@@ -2605,7 +2626,7 @@ static void rt_sync(void) {
                     continue;
                 }
             }
-            __asm__ volatile("yield");
+            rt_pause(&pz);
         }
         gVitaDrawWhere = 0;
         gVitaRt[2]++;
@@ -2708,8 +2729,9 @@ static void rt_wait_swaps(void) {
         gVitaDrawWhere = 1;
         R36_CTX_RELEASE();
         rt_kick();
+        unsigned pz = 0;
         while (sRtSwapsDone != sRtSwapsSent) {
-            __asm__ volatile("yield");
+            rt_pause(&pz);
         }
         gVitaDrawWhere = 0;
         gVitaRt[2]++;
