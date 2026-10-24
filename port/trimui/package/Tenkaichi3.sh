@@ -53,6 +53,8 @@ echo "game folder: $GAMEDIR; PortMaster: $controlfolder (${CFW_NAME:-?})"
 
 export LD_LIBRARY_PATH="$GAMEDIR/libs:/usr/trimui/lib:/usr/lib:$LD_LIBRARY_PATH"
 export MALLOC_ARENA_MAX=1
+# (bt3.txt bench=1: the driver's costs measured at start, before bt3.txt is read by the program)
+grep -q '^bench=1' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_BENCH=1
 unset SDL_BLITTER_DISABLED
 
 # the processor at a fixed speed while the game runs (put back afterwards): the governor, and the lowest and
