@@ -76,8 +76,8 @@ int gVitaPbufMb;  /* bt3.txt pbuf=<MB>: the parameter buffer, 0 vitaGL's default
    once and described again for the size of the moment (vitaGL change, vglSwapResolution); the change is made at a
    picture's end (GsGpu_FrameEnd, scr_switch). bt3.txt menuhi=0: 640 x 368 everywhere, as before. */
 #ifdef PORT_R36S /* the R36S: its own screen's 640 x 480 for both (bt3.txt res=WxH for the fights, menures=WxH) */
-#ifdef PORT_TSP /* (the TrimUI Smart Pro: 1280 x 720; everything drawn at the Vita's 960 x 544, scaled up) */
-int gR36FightW = 960, gR36FightH = 544, gR36MenuW = 960, gR36MenuH = 544;
+#ifdef PORT_TSP /* (the TrimUI Smart Pro: 1280 x 720; everything drawn at 854 x 480, scaled up: at 960 x 544 the GPU was the limit) */
+int gR36FightW = 854, gR36FightH = 480, gR36MenuW = 854, gR36MenuH = 480;
 #else
 int gR36FightW = 640, gR36FightH = 480, gR36MenuW = 640, gR36MenuH = 480;
 #endif
@@ -1313,7 +1313,7 @@ extern int gVitaSliver;
 int gVitaFxSweep;           /* the effects left out in turn, 60 pictures each, the chip's time logged by which */
 int gVitaFxAb = 0;          /* (TrimUI test build) see frame_begin */
 int gVitaGlowHalf = 1;      /* (see glow_exec) */
-int gVitaGpuAb = 1;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
+int gVitaGpuAb = 0;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
 int gVitaUbAb = 0;          /* (TrimUI test build) the uniform blocks' four ways in turn, 10 s each (r36s_gl.c gR36UbMode) */
 int gVitaOptAb = 0;         /* (TrimUI test build) the driver's ways of doing less (gR36Opt) off every other 10 s */
 int gVitaFxMask;            /* 1 the table passes, 2 the glow, 4 the work targets' effects, 8 the outline */
