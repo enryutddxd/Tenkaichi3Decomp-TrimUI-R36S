@@ -56,7 +56,12 @@ void R36_GameState(FILE *f) {
         extern unsigned gVitaPsw[4], gVitaStBkN;
         extern int gVitaStBk, gVitaStBkAb;
         static unsigned pw[4], pn;
-        extern int gR36UbLim;
+        extern int gR36UbLim, gVitaFxPrev, gVitaFxPrevAb;
+        extern unsigned gVitaFxEarly[2];
+        static unsigned pe[2];
+        fprintf(f, "  ids/fog from the picture before: %s%s, %u ids and %u fog passes made early\n", gVitaFxPrev ? "on" : "off", gVitaFxPrevAb ? " (A/B, 10 s each)" : "",
+                gVitaFxEarly[0] - pe[0], gVitaFxEarly[1] - pe[1]);
+        memcpy(pe, gVitaFxEarly, sizeof(pe));
         fprintf(f, "  stage strips on the batched program: %s%s, %u draws; uniform slots in use only: %s\n", gVitaStBk ? "on" : "off", gVitaStBkAb ? " (A/B, 10 s each)" : "",
                 gVitaStBkN - pn, gR36UbLim ? "on" : "off");
         pn = gVitaStBkN;

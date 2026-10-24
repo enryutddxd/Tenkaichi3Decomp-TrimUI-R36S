@@ -1253,6 +1253,13 @@ static void read_settings(void) {
             extern int gVitaStBk, gVitaStBkAb;
             gVitaStBk = atoi(eq);
             gVitaStBkAb = 0;
+        } else if (strcmp(line, "fxprev") == 0) { /* (TrimUI) 1: the ids and fog passes from the picture before, at the start */
+            extern int gVitaFxPrev, gVitaFxPrevAb;
+            gVitaFxPrev = atoi(eq);
+            gVitaFxPrevAb = 0;
+        } else if (strcmp(line, "fxprevab") == 0) {
+            extern int gVitaFxPrevAb;
+            gVitaFxPrevAb = atoi(eq);
         } else if (strcmp(line, "ublim") == 0) { /* (TrimUI) 0: the batched parts' whole uniform block copied each draw */
             extern int gR36UbLim, gVitaStBkAb;
             gR36UbLim = atoi(eq);

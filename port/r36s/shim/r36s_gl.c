@@ -798,6 +798,7 @@ static int vtex_new(void) {
 GLuint R36_TexNewLazy(void) {
     return (GLuint)vtex_new();
 }
+int gR36KeepDepth; /* (vita_vgl.c fxprev) the picture's depth stored at its end: read in the next picture */
 static GLuint real_tex(GLuint v) {
     if (v == 0 || (int)v >= sTexCap || !sTex[v].used) {
         return 0;
@@ -807,6 +808,9 @@ static GLuint real_tex(GLuint v) {
     }
     if (sTex[v].alias == 4) {
         return sDepthTex;
+    }
+    if (sTex[v].alias == 5) { /* (the picture before's) */
+        return sDepthTexA[(gxm_back_buffer_index + NDISP - 1) % NDISP];
     }
     if (sTex[v].real == 0) { /* (R36_TexNewLazy's: made now) */
         p_glGenTextures(1, &sTex[v].real);
@@ -982,7 +986,7 @@ void r36_glTexParameteri(GLenum target, GLenum pname, GLint param) {
     ENTER();
     GLuint v = sBound[sUnit & 3];
     int k = pname == GL_TEXTURE_MIN_FILTER ? 0 : pname == GL_TEXTURE_MAG_FILTER ? 1 : pname == GL_TEXTURE_WRAP_S ? 2 : pname == GL_TEXTURE_WRAP_T ? 3 : -1;
-    if (v != 0 && (int)v < sTexCap && sTex[v].alias == 4 && (pname == GL_TEXTURE_MIN_FILTER || pname == GL_TEXTURE_MAG_FILTER)) {
+    if (v != 0 && (int)v < sTexCap && (sTex[v].alias == 4 || sTex[v].alias == 5) && (pname == GL_TEXTURE_MIN_FILTER || pname == GL_TEXTURE_MAG_FILTER)) {
         param = GL_NEAREST; /* (a depth texture is not filtered in OpenGL ES 3) */
     }
     if (target == GL_TEXTURE_2D && k >= 0 && v != 0 && (int)v < sTexCap && sTex[v].used && sTex[v].alias == 0) {
@@ -1013,6 +1017,16 @@ void vglSetupTexture(GLenum target, void *data, SceGxmTextureFormat format, SceG
         }
     }
     R36_LogLine("r36 gl: vglSetupTexture of other memory (format %08x, %d x %d): not supported\n", (unsigned)format, (int)width, (int)height);
+}
+void vglTexImageDepthBufferPrev(GLenum target) { /* (the depth of the display buffer drawn before the one drawn now) */
+    GLuint v = sBound[sUnit & 3];
+    (void)target;
+    if (v != 0 && (int)v < sTexCap) {
+        ENTER();
+        sTex[v].alias = 5;
+        p_glBindTexture(GL_TEXTURE_2D, sDepthTexA[(gxm_back_buffer_index + NDISP - 1) % NDISP]);
+        LEAVE();
+    }
 }
 void vglTexImageDepthBuffer(GLenum target) {
     GLuint v = sBound[sUnit & 3];
@@ -2608,7 +2622,7 @@ void vglSwapBuffers(GLboolean has_commondialog) {
         unsigned long long t0 = sceKernelGetProcessTimeWide(), t1;
         static unsigned long long sumPresent, sumBetween, last;
         static unsigned n, up0, up1;
-        if (discard_on()) { /* (the picture's depth and stencil: not stored, the next one clears them) */
+        if (discard_on() && !gR36KeepDepth) { /* (the picture's depth and stencil: not stored, the next one clears them) */
             static const GLenum kDS[2] = {GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
             r_fbo(sDispFbo[done]);
             p_glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, kDS);

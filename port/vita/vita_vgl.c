@@ -445,7 +445,7 @@ typedef struct Variant { GLuint prog; GLint test, tex, u[6]; int bk; /* (R36S: a
 /* (for the log) the program changes: all; between kinds (the GS's, the parts') with the same pixel shader flags; with
    the flags differing only by 16/64/1024 (the GS's own vertex shader variants); within one kind */
 unsigned gVitaPsw[4];
-int gVitaStBk = 1, gVitaStBkAb = 1; /* the stage's GS-way strips with the batched program (bt3.txt stbk, stbkab: in turn) */
+int gVitaStBk = 1, gVitaStBkAb = 0; /* the stage's GS-way strips with the batched program (bt3.txt stbk, stbkab: in turn) */
 unsigned gVitaStBkN;
 static int sPswKind = -1, sPswFlags = -1;
 unsigned gVitaPswPair[64][2]; /* (for the log) the commonest changes: (from kind << 12 | flags) << 16 | (to ...), count */
@@ -1567,6 +1567,7 @@ static uint32_t wp_sig(void) {
 static void rt_fbegin_put(void);
 #endif
 static void glow_frame(void);
+static void fx_early(void);
 static void frame_begin_gl(void) { /* (the thread that makes the GL calls) */
     glow_frame();
     if (sIdsTexA[0] != 0) { /* (this picture's copies: the next set) */
@@ -1576,6 +1577,7 @@ static void frame_begin_gl(void) { /* (the thread that makes the GL calls) */
         sFogTex = sFogTexA[sFxSet % FXN];
         sFogFbo = sFogFboA[sFxSet % FXN];
     }
+    fx_early();
     target_set(0);
     GLC_RESET();
     glDisable(GL_SCISSOR_TEST);
@@ -5891,6 +5893,7 @@ static const char kFragTblByte[] = /* a table pass from that byte */
     "    float4 c = tex2D(uClut, float2((idx + 0.5f) * (1.0f / 256.0f), 0.5f));\n"
     "    return float4(c.rgb, saturate(c.a * (255.0f / 128.0f)));\n"
     "}\n";
+static GLuint sDepthPrevTex; /* (fxprev) the picture before's depth */
 static GLuint sDepthTex, sFxProg[5]; /* copy, table from the ids, table from the fog, (163) fog byte, table from it */
 static GLint sFxU[5][4];                      /* uV, uSrc, uClut, uP */
 static int sDepthByteIsFog;    /* the drawing thread: what the depth page's top byte holds now */
@@ -6015,6 +6018,16 @@ static void fx_init(void) {
         sXfU[2] = glGetUniformLocation(sXfProg, "uP");
     }
     fx_targets();
+#ifdef PORT_R36S
+    {   /* (the picture before's depth: fxprev) */
+        extern void vglTexImageDepthBufferPrev(GLenum target);
+        glGenTextures(1, &sDepthPrevTex);
+        glBindTexture(GL_TEXTURE_2D, sDepthPrevTex);
+        vglTexImageDepthBufferPrev(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    }
+#endif
     glGenTextures(1, &sDepthTex);
     glBindTexture(GL_TEXTURE_2D, sDepthTex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -6116,8 +6129,47 @@ static void fx_quad(void) {
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 /* (the thread that draws) the ids: the picture so far to memory, its alpha copied into a picture of their own */
+/* (TrimUI) the ids' copy and the fog byte from the picture before, made at the picture's start: the picture's
+   scene is not split twice in its middle to read its alpha and depth (each split ~1.5 ms of the driver's waiting).
+   The passes' results are one picture late. bt3.txt fxprev. */
+int gVitaFxPrev = 0, gVitaFxPrevAb = 1;
+unsigned gVitaFxEarly[2];
+static float sFogZmax;
+static int sHadIds, sHadFog, sEarlyIds, sEarlyFog, sKeepDepth;
+static void ids_run(GLuint view);
+static void fog_run(GLuint depth, float zmax);
+static void fx_early(void) {
+#ifdef PORT_R36S
+    extern int gR36KeepDepth;
+    int had = sKeepDepth; /* (the picture before kept its depth) */
+    sKeepDepth = gR36KeepDepth = gVitaFxPrev;
+#else
+    int had = 0;
+#endif
+    sEarlyIds = sEarlyFog = 0;
+    if (gVitaFxPrev && had) {
+        if (sHadIds && sOlTex[(gxm_back_buffer_index + 2) % 3] != 0) {
+            ids_run(sOlTex[(gxm_back_buffer_index + 2) % 3]);
+            sEarlyIds = sIdsOk;
+            gVitaFxEarly[0]++;
+        }
+        if (sHadFog && sDepthPrevTex != 0) {
+            fog_run(sDepthPrevTex, sFogZmax);
+            sEarlyFog = sFogOk;
+            gVitaFxEarly[1]++;
+        }
+    }
+    sHadIds = sHadFog = 0;
+}
 static void ids_exec(void) {
-    GLuint view = sOlTex[gxm_back_buffer_index % 3];
+    sHadIds = 1;
+    if (sEarlyIds) {
+        sIdsOk = 1;
+        return;
+    }
+    ids_run(sOlTex[gxm_back_buffer_index % 3]);
+}
+static void ids_run(GLuint view) {
     /* (no split of the picture's scene here: the switch to the copy's own target ends it, and the chip stores it
        before it begins the copy) */
     sIdsOk = 0;
@@ -6149,6 +6201,15 @@ static void ids_exec(void) {
 static void fog_exec(const uint8_t *p) {
     float zmax;
     memcpy(&zmax, p, 4);
+    sHadFog = 1;
+    sFogZmax = zmax;
+    if (sEarlyFog) {
+        sFogOk = 1;
+        return;
+    }
+    fog_run(sDepthTex, zmax);
+}
+static void fog_run(GLuint depth, float zmax) {
     sFogOk = 0;
     if (sFogFbo == 0 || sFxProg[3] == 0) {
         return;
@@ -6156,7 +6217,7 @@ static void fog_exec(const uint8_t *p) {
     target_set(TGT_FOG);
     glUseProgram(sFxProg[3]);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, sDepthTex);
+    glBindTexture(GL_TEXTURE_2D, depth);
     if (sFxU[3][1] >= 0) {
         glUniform1i(sFxU[3][1], 0);
     }
@@ -6849,6 +6910,10 @@ void GsGpu_FrameEnd(void) {
             extern volatile unsigned gR36ProfWindow;
             extern int gR36UbMode;
             gR36UbMode = 1 + (int)(gR36ProfWindow % 4u);
+        }
+        if (gVitaFxPrevAb) { /* in turn: the ids and fog passes as before; from the picture before, at the picture's start */
+            extern volatile unsigned gR36ProfWindow;
+            gVitaFxPrev = (gR36ProfWindow & 1) != 0;
         }
         if (gVitaStBkAb) { /* in turn: as v47; only the uniform slots in use copied; and the stage's strips on one program */
             extern volatile unsigned gR36ProfWindow;
