@@ -1087,7 +1087,10 @@ static GLuint sXfFbo, sXfTex, sXfProg;
 static GLint sXfU[3];
 static int sXfOk;
 static GLuint sIdsFbo, sIdsTex;
-static GLuint sGlowFbo[2], sGlowTex[2];
+#define GLOW_N 4 /* (each glow of a picture, by its order, its own pair: kept for the next picture, see gVitaGlowHalf) */
+static GLuint sGlowFbo[GLOW_N * 2], sGlowTex[GLOW_N * 2];
+static int sGlowCur; /* (the pair of the glow being drawn) */
+static void tgt_discard(void); /* (what the target held before is not needed: not loaded by the chip) */
 static int sGlowSkip;          /* between the glow's markers: its own passes dropped */
 static int sOlTail;            /* after the outline's marker: the game's own outline passes
                                   that follow it (gfxm_a.c ObjOutline_Draw: the edge image into the alpha, the darkening
@@ -1309,6 +1312,7 @@ int gVitaFxOff;             /* (the log's pictures without the effects: with the
 extern int gVitaSliver;
 int gVitaFxSweep;           /* the effects left out in turn, 60 pictures each, the chip's time logged by which */
 int gVitaFxAb = 0;          /* (TrimUI test build) see frame_begin */
+int gVitaGlowHalf = 1;      /* (see glow_exec) */
 int gVitaGpuAb = 1;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
 int gVitaUbAb = 0;          /* (TrimUI test build) the uniform blocks' four ways in turn, 10 s each (r36s_gl.c gR36UbMode) */
 int gVitaOptAb = 0;         /* (TrimUI test build) the driver's ways of doing less (gR36Opt) off every other 10 s */
@@ -1415,7 +1419,7 @@ static void target_set(int t) {
         glBindFramebuffer(GL_FRAMEBUFFER, sXfFbo);
         glViewport(0, 0, SCR_W, SCR_H);
     } else if (t == TGT_GLOW || t == TGT_GLOW + 1) { /* the native glow */
-        glBindFramebuffer(GL_FRAMEBUFFER, sGlowFbo[t - TGT_GLOW]);
+        glBindFramebuffer(GL_FRAMEBUFFER, sGlowFbo[sGlowCur * 2 + t - TGT_GLOW]);
         glViewport(0, 0, 64, 64);
     } else if (t >= WT_BASE) { /* a work target */
         glBindFramebuffer(GL_FRAMEBUFFER, sWt[(t - WT_BASE) % WT_MAX].fbo);
@@ -1429,6 +1433,9 @@ static void target_set(int t) {
         glViewport(VIEW_X, 0, VIEW_W, VIEW_H);
     }
     vglBt3Dirty(); /* (the next scene's uniform buffers) */
+    if (t == TGT_IDS || t == TGT_FOG || t == TGT_XF || t == TGT_GLOW || t == TGT_GLOW + 1) {
+        tgt_discard(); /* (each of these passes writes all of its target) */
+    }
     GLC_RESET();
     sScissor[0] = sScissor[1] = sScissor[2] = sScissor[3] = -1;
     sTgtCur = t;
@@ -1502,7 +1509,9 @@ static uint32_t wp_sig(void) {
 #ifdef PORT_R36S
 static void rt_fbegin_put(void);
 #endif
+static void glow_frame(void);
 static void frame_begin_gl(void) { /* (the thread that makes the GL calls) */
+    glow_frame();
     target_set(0);
     GLC_RESET();
     glDisable(GL_SCISSOR_TEST);
@@ -6218,7 +6227,7 @@ static void glow_init(void) {
         sGlowU[k][2] = sGlowProg[k] ? glGetUniformLocation(sGlowProg[k], "uP") : -1;
         sGlowU[k][3] = sGlowProg[k] ? glGetUniformLocation(sGlowProg[k], "uC") : -1;
     }
-    for (k = 0; k < 2; k++) {
+    for (k = 0; k < GLOW_N * 2; k++) {
         glGenTextures(1, &sGlowTex[k]);
         glBindTexture(GL_TEXTURE_2D, sGlowTex[k]);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
@@ -6245,14 +6254,41 @@ static void glow_pass(int k, GLuint src, float u0, float u1, float flip) {
     glUniform4f(sGlowU[k][0], u0, u1, flip, 0.0f);
     fx_quad();
 }
+/* (TrimUI) gVitaGlowHalf: each glow worked out every other picture (the first of a picture on even pictures, the
+   second on odd ones), the picture between adding the one kept from the picture before: on this GPU each glow
+   ends the picture's scene (stored, and loaded again after: 960 x 544 colour and depth), ~3.5 ms. bt3.txt
+   glowhalf=0: every picture. */
+static unsigned sGlowPic, sGlowIdx;    /* (the render thread's count of pictures; the glow's order in this one) */
+static uint32_t sGlowKept[GLOW_N];     /* (the colour a kept glow was made with; 0 none) */
+static unsigned sGlowKeptPic[GLOW_N];
+unsigned gVitaGlowReuse;
+static void tgt_discard(void) {
+#ifdef PORT_R36S
+    extern void R36_DiscardColor(void);
+    R36_DiscardColor();
+#endif
+}
+static void glow_frame(void) { /* (the render thread, at a picture's beginning) */
+    sGlowPic++;
+    sGlowIdx = 0;
+}
 /* (the thread that draws) */
 static void glow_exec(const uint8_t *p) {
     const GlowOp *op = (const GlowOp *)(const void *)p;
     GLuint view = sOlTex[gxm_back_buffer_index % 3];
     float r = (float)(op->color & 0xFF) / 128.0f, g = (float)((op->color >> 8) & 0xFF) / 128.0f, b = (float)((op->color >> 16) & 0xFF) / 128.0f;
+    int idx = (int)(sGlowIdx < GLOW_N ? sGlowIdx : GLOW_N - 1);
+    sGlowIdx++;
     if (view == 0) {
         return;
     }
+    sGlowCur = idx;
+    if (gVitaGlowHalf && ((sGlowPic + (unsigned)idx) & 1) && sGlowKept[idx] == (op->color | 0x80000000u) && sGlowPic - sGlowKeptPic[idx] <= 2) {
+        gVitaGlowReuse++;
+        goto add; /* (the glow kept from the picture before) */
+    }
+    sGlowKept[idx] = op->color | 0x80000000u;
+    sGlowKeptPic[idx] = sGlowPic;
     GLC_RESET();
     glDisable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
@@ -6279,12 +6315,17 @@ static void glow_exec(const uint8_t *p) {
     scissor(0, 0, 64, 64);
     glUseProgram(sGlowProg[1]);
     glUniform4f(sGlowU[1][2], 1.0f / 64.0f, 0.0f, 0.0f, 0.0f);
-    glow_pass(1, sGlowTex[0], 0.0f, 1.0f, -1.0f);
+    glow_pass(1, sGlowTex[idx * 2 + 0], 0.0f, 1.0f, -1.0f);
     target_set(TGT_GLOW);
     scissor(0, 0, 64, 64);
     glUseProgram(sGlowProg[1]);
     glUniform4f(sGlowU[1][2], 0.0f, 1.0f / 64.0f, 0.0f, 0.0f);
-    glow_pass(1, sGlowTex[1], 0.0f, 1.0f, -1.0f);
+    glow_pass(1, sGlowTex[idx * 2 + 1], 0.0f, 1.0f, -1.0f);
+add:
+    GLC_RESET();
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_STENCIL_TEST);
+    glActiveTexture(GL_TEXTURE0);
     /* added to the picture, tinted with `glow` (ALPHA 0x68, FIX 0x80: Cs + Cd; the picture's alpha left as it is) */
     target_set(0);
     scissor(VIEW_X, 0, VIEW_W, VIEW_H);
@@ -6294,7 +6335,7 @@ static void glow_exec(const uint8_t *p) {
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
     glUseProgram(sGlowProg[2]);
     glUniform4f(sGlowU[2][3], (float)(op->glow & 0xFF) / 128.0f, (float)((op->glow >> 8) & 0xFF) / 128.0f, (float)((op->glow >> 16) & 0xFF) / 128.0f, 0.0f);
-    glow_pass(2, sGlowTex[0], 0.0f, 1.0f, 1.0f);
+    glow_pass(2, sGlowTex[idx * 2 + 0], 0.0f, 1.0f, 1.0f);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     if (sMidOn && vglSplitScene()) {
         mid_shot(2); /* (the log: after it) */
@@ -6524,10 +6565,11 @@ void GsGpu_FrameEnd(void) {
         if (gVitaGpuAb && !gVitaGsSkip) {
             extern volatile unsigned gR36ProfWindow;
             static int keepW, keepH;
-            static const int kMask[5] = {0, 1, 2, 4, 8}; /* (as set; without the table passes and fog; the glow; the work targets' effects; the outline) */
-            unsigned k = gR36ProfWindow % 5u;
+            extern int gR36DiscardAb;
+            unsigned k = gR36ProfWindow % 2u; /* (the glow every other picture and the discards: on, off) */
             (void)keepW; (void)keepH;
-            gVitaFxMask = kMask[k];
+            gVitaGlowHalf = k == 0;
+            gR36DiscardAb = k == 0;
         }
         if (gVitaUbAb) {
             extern volatile unsigned gR36ProfWindow;

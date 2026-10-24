@@ -67,7 +67,7 @@ extern void R36_LogLine(const char *fmt, ...);
     X(void, glVertexAttrib4f, (GLuint, GLfloat, GLfloat, GLfloat, GLfloat)) X(void, glViewport, (GLint, GLint, GLsizei, GLsizei)) \
     X(void, glBindVertexArray, (GLuint)) X(void *, glMapBufferRange, (GLenum, GLintptr, GLsizeiptr, GLbitfield)) X(GLboolean, glUnmapBuffer, (GLenum)) \
     X(void, glDrawElementsBaseVertex, (GLenum, GLsizei, GLenum, const void *, GLint)) \
-    X(void, glWaitSync, (GLsync, GLbitfield, GLuint64)) \
+    X(void, glWaitSync, (GLsync, GLbitfield, GLuint64)) X(void, glInvalidateFramebuffer, (GLenum, GLsizei, const GLenum *)) \
     X(void, glBindBufferRange, (GLenum, GLuint, GLuint, GLintptr, GLsizeiptr)) X(GLuint, glGetUniformBlockIndex, (GLuint, const GLchar *)) \
     X(void, glUniformBlockBinding, (GLuint, GLuint, GLuint)) X(void, glGetActiveUniformsiv, (GLuint, GLsizei, const GLuint *, GLenum, GLint *)) \
     X(void, glGetActiveUniformBlockiv, (GLuint, GLuint, GLenum, GLint *)) X(void, glGetAttachedShaders, (GLuint, GLsizei, GLsizei *, GLuint *)) \
@@ -1896,6 +1896,25 @@ void r36_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *idx
     }
     LEAVE();
 }
+/* (vita_vgl.c) the bound target's colour not needed (all of it is drawn next): the GPU does not load it. R36_DISCARD=0: not */
+static int sDiscardOff = -1;
+int gR36DiscardAb = 1; /* (vita_vgl.c's A/B: 0 not now) */
+static int discard_on(void) {
+    if (sDiscardOff < 0) {
+        const char *e = getenv("R36_DISCARD");
+        sDiscardOff = e != NULL && atoi(e) == 0;
+    }
+    return !sDiscardOff && gR36DiscardAb && p_glInvalidateFramebuffer != NULL;
+}
+void R36_DiscardColor(void) {
+    static const GLenum kC[1] = {GL_COLOR_ATTACHMENT0};
+    if (!discard_on()) {
+        return;
+    }
+    ENTER();
+    p_glInvalidateFramebuffer(GL_FRAMEBUFFER, 1, kC);
+    LEAVE();
+}
 /* (vita_vgl.c) indices in the stream at off, their vertices from vertex base on: 0 when the driver has no such draw */
 int R36_DrawElementsBase(GLenum mode, GLsizei count, GLenum type, long off, GLint base) {
     if (p_glDrawElementsBaseVertex == NULL || sCurProg == 0) {
@@ -2350,6 +2369,11 @@ void vglSwapBuffers(GLboolean has_commondialog) {
         unsigned long long t0 = sceKernelGetProcessTimeWide(), t1;
         static unsigned long long sumPresent, sumBetween, last;
         static unsigned n, up0, up1;
+        if (discard_on()) { /* (the picture's depth and stencil: not stored, the next one clears them) */
+            static const GLenum kDS[2] = {GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
+            r_fbo(sDispFbo[done]);
+            p_glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, kDS);
+        }
         if (sPresentOn) {
             present_post((int)done, sDispTex[done], sDispW, sDispH, sAspect);
         } else {

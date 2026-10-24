@@ -1243,6 +1243,11 @@ static void read_settings(void) {
         } else if (strcmp(line, "gpuab") == 0) { /* (TrimUI test build) 0: no turns of 640 x 368 and effects off */
             extern int gVitaGpuAb;
             gVitaGpuAb = atoi(eq);
+        } else if (strcmp(line, "discard") == 0) { /* (TrimUI) 0: the targets' old contents loaded by the GPU as before */
+            setenv("R36_DISCARD", eq, 1);
+        } else if (strcmp(line, "glowhalf") == 0) { /* (TrimUI) 0: each glow worked out every picture */
+            extern int gVitaGlowHalf;
+            gVitaGlowHalf = atoi(eq);
         } else if (strcmp(line, "present") == 0) { /* (TrimUI) 0: the picture put on the screen by the render thread itself */
             setenv("R36_PRESENT", eq, 1);
         } else if (strcmp(line, "ubo") == 0) { /* (TrimUI) 0: the shaders' uniforms as before (not in uniform blocks) */
