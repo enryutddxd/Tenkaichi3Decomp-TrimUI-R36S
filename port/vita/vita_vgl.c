@@ -2092,7 +2092,19 @@ static GLuint texture_get_k(uint64_t t0raw, uint64_t texa) {
         ke->gi = gi;
         ke->tsig = tsig;
         if (bits <= 8) {
+#ifdef PORT_TSP
+            /* (TrimUI) the palette by its colours, not by the ids of its blocks: the game paints palettes with sprites
+               (an aura's, several times a picture), each paint new ids though the colours come back the same, and each
+               made its 256 x 256 texture again (60 times in 2 s; the render thread's time on texture uploads) */
+            uint32_t pc[256], pn = bits == 8 ? 256u : 16u, ph = 2166136261u, q;
+            Gs_VramReadRect(cbp, 1, cpsm, bits == 8 ? 16 : 8, bits == 8 ? 16 : 2, pc);
+            for (q = 0; q < pn; q++) {
+                ph = (ph ^ pc[q]) * 16777619u;
+            }
+            gen = (gen ^ ph) * 16777619u + cbp;
+#else
             gen = (gen ^ Gs_RectId(cbp, 1, cpsm, 0, 0, bits == 8 ? 16 : 8, bits == 8 ? 16 : 2)) * 16777619u + cbp;
+#endif
         }
         if (sigSame) {
             gVitaSigCheck[0]++;
