@@ -1080,6 +1080,11 @@ static void tbl_exec(const uint8_t *p);
 #define TGT_FOG 11             /* the fog byte worked out once from the depth (GfxDepthFog_Draw) */
 #define TGT_XF 10              /* the cross-fade's copy of the picture shown last */
 static GLuint sFogFbo, sFogTex;
+/* (three of each of the copies a picture makes and reads (the ids, the fog byte), one per picture in turn: the
+   next picture does not draw into the one the GPU may still be reading for the picture before) */
+#define FXN 3
+static GLuint sFogFboA[FXN], sFogTexA[FXN], sIdsFboA[FXN], sIdsTexA[FXN];
+static unsigned sFxSet;
 static int sFogOk;             /* (the thread that draws) sFogTex holds the fog byte */
 static void fog_exec(const uint8_t *p);
 static void xf_exec(const uint8_t *p);  /* the cross-fade, below */
@@ -1519,6 +1524,13 @@ static void rt_fbegin_put(void);
 static void glow_frame(void);
 static void frame_begin_gl(void) { /* (the thread that makes the GL calls) */
     glow_frame();
+    if (sIdsTexA[0] != 0) { /* (this picture's copies: the next set) */
+        sFxSet++;
+        sIdsTex = sIdsTexA[sFxSet % FXN];
+        sIdsFbo = sIdsFboA[sFxSet % FXN];
+        sFogTex = sFogTexA[sFxSet % FXN];
+        sFogFbo = sFogFboA[sFxSet % FXN];
+    }
     target_set(0);
     GLC_RESET();
     glDisable(GL_SCISSOR_TEST);
@@ -5843,10 +5855,17 @@ static void fx_target(GLuint *tex, GLuint *fbo) {
 }
 /* the copies of the picture: the ids, the fog byte, the cross-fade's */
 static void fx_targets(void) {
-    fx_target(&sIdsTex, &sIdsFbo);
-    if (sFxProg[3] && sFxProg[4]) {
-        fx_target(&sFogTex, &sFogFbo);
+    int k;
+    for (k = 0; k < FXN; k++) {
+        fx_target(&sIdsTexA[k], &sIdsFboA[k]);
+        if (sFxProg[3] && sFxProg[4]) {
+            fx_target(&sFogTexA[k], &sFogFboA[k]);
+        }
     }
+    sIdsTex = sIdsTexA[sFxSet % FXN];
+    sIdsFbo = sIdsFboA[sFxSet % FXN];
+    sFogTex = sFogTexA[sFxSet % FXN];
+    sFogFbo = sFogFboA[sFxSet % FXN];
     if (sXfProg != 0) {
         fx_target(&sXfTex, &sXfFbo);
     }

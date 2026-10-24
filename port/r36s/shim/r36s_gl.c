@@ -488,7 +488,9 @@ static int sTexCap, sTexFree = -1;
 static GLuint sBound[4];    /* the renderer's texture per unit */
 static int sUnit;
 
-static GLuint sDispTex[NDISP], sDispFbo[NDISP], sDepthTex;
+static GLuint sDispTex[NDISP], sDispFbo[NDISP], sDepthTexA[NDISP];
+/* (each display buffer its own depth: a picture's depth is read (the fog) while the next one is drawn) */
+#define sDepthTex sDepthTexA[gxm_back_buffer_index % NDISP]
 static int sDispW, sDispH, sNewW, sNewH;
 static int sOnDisp = 1;     /* framebuffer 0 (the display) is bound */
 static GLuint sFboBound;    /* the renderer's framebuffer object, or 0 */
@@ -1055,7 +1057,7 @@ static void disp_alloc(int w, int h) {
     int i;
     if (sDispTex[0] == 0) {
         p_glGenTextures(NDISP, sDispTex);
-        p_glGenTextures(1, &sDepthTex);
+        p_glGenTextures(NDISP, sDepthTexA);
         p_glGenFramebuffers(NDISP, sDispFbo);
     }
     for (i = 0; i < NDISP; i++) {
@@ -1066,17 +1068,19 @@ static void disp_alloc(int w, int h) {
         p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
-    p_glBindTexture(GL_TEXTURE_2D, sDepthTex);
-    p_glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, w, h, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, NULL);
-    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    for (i = 0; i < NDISP; i++) {
+        p_glBindTexture(GL_TEXTURE_2D, sDepthTexA[i]);
+        p_glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, w, h, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, NULL);
+        p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
     for (i = 0; i < NDISP; i++) {
         GLenum st;
         p_glBindFramebuffer(GL_FRAMEBUFFER, sDispFbo[i]);
         p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sDispTex[i], 0);
-        p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, sDepthTex, 0);
+        p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, sDepthTexA[i], 0);
         st = p_glCheckFramebufferStatus(GL_FRAMEBUFFER);
         if (st != GL_FRAMEBUFFER_COMPLETE) {
             R36_LogLine("r36 gl: display buffer %d not complete (%x)\n", i, (unsigned)st);
