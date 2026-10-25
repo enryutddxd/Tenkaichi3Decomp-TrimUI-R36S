@@ -1365,7 +1365,11 @@ int gVitaFxSweep;           /* the effects left out in turn, 60 pictures each, t
 int gVitaFxAb = 0;          /* (TrimUI test build) see frame_begin */
 int gVitaGlowHalf = 1;      /* (see glow_exec) */
 extern int gVitaAClear;
-int gVitaGpuAb = 0;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
+#ifdef PORT_R36S64
+int gVitaGpuAb = 1; /* (R36S 64-bit test 3: the effects A/B on by default) */
+#else
+int gVitaGpuAb = 0; //         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
+#endif
 int gVitaUbAb = 0;          /* (TrimUI test build) the uniform blocks' four ways in turn, 10 s each (r36s_gl.c gR36UbMode) */
 int gVitaOptAb = 0;         /* (TrimUI test build) the driver's ways of doing less (gR36Opt) off every other 10 s */
 #if defined(PORT_TSP) || defined(PORT_R36S64) /* (the TrimUI: the work targets' effects and the glow off by default: ~25 -> ~29.5 fps in a fight at 854 x 480, the
@@ -6945,9 +6949,9 @@ void GsGpu_FrameEnd(void) {
         if (gVitaGpuAb && !gVitaGsSkip) {
             extern volatile unsigned gR36ProfWindow;
             static int keepW, keepH;
-            static const int kMask[3] = {4 | 2, 4 | 2 | 1, 4 | 2 | 8}; /* (as by default; and without the table passes and fog; without the outline) */
+            static const int kMask[4] = {4 | 2, 4 | 2 | 1, 4 | 2 | 8, 15}; /* (as by default; and without the table passes and fog; without the outline; none) */
             (void)keepW; (void)keepH;
-            gVitaFxMask = kMask[gR36ProfWindow % 3u];
+            gVitaFxMask = kMask[gR36ProfWindow % 4u];
         }
         if (gVitaUbAb) {
             extern volatile unsigned gR36ProfWindow;

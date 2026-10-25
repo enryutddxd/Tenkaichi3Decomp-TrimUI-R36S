@@ -37,8 +37,8 @@ void R36_GameState(FILE *f) {
         extern unsigned gVitaGlowReuse;
         static unsigned pr;
         if (gVitaGpuAb) {
-            static const char *kAb[3] = {"as by default", "no table passes/fog", "no outline"};
-            fprintf(f, "  FX A/B in these 10 s: %s\n", kAb[gR36ProfWindow % 3u]);
+            static const char *kAb[4] = {"as by default", "no table passes/fog", "no outline", "no effects at all"};
+            fprintf(f, "  FX A/B in these 10 s: %s\n", kAb[gR36ProfWindow % 4u]);
         }
         pr = gVitaGlowReuse;
     }
