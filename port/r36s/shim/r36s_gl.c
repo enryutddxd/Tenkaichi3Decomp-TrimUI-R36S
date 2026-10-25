@@ -408,6 +408,36 @@ void R36_GlTimes(FILE *f, double secs) {
         prev[0] = gR36Dpb[0]; prev[1] = gR36Dpb[1]; prev[2] = gR36Dpb[2]; prev[3] = gR36Draws; prev[4] = gR36Frames;
         fprintf(f, "draws: %.0f a second, %.0f per picture (%.1f pictures a second) | model parts batched: %.0f a second in %.0f draws, %.0f clashes\n",
                 c[3] / secs, c[4] ? (double)c[3] / c[4] : 0.0, c[4] / secs, c[0] / secs, c[1] / secs, c[2] / secs);
+        {   /* fps.txt: one line per report (pictures a second, the processor's and the GPU's clocks, the chip's
+               temperature), for a long session's look at the heat */
+            static double tsum;
+            static int first = 1;
+            FILE *q = fopen("fps.txt", first ? "w" : "a");
+            tsum += secs;
+            if (q != NULL) {
+                long cpu = 0, gpu = 0, temp = 0;
+                char v[64];
+                FILE *g;
+                if ((g = fopen("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", "r")) != NULL) {
+                    if (fgets(v, sizeof(v), g) != NULL) { cpu = atol(v) / 1000; }
+                    fclose(g);
+                }
+                if ((g = fopen("/sys/class/devfreq/ff400000.gpu/cur_freq", "r")) != NULL) {
+                    if (fgets(v, sizeof(v), g) != NULL) { gpu = atol(v) / 1000000; }
+                    fclose(g);
+                }
+                if ((g = fopen("/sys/class/thermal/thermal_zone0/temp", "r")) != NULL) {
+                    if (fgets(v, sizeof(v), g) != NULL) { temp = atol(v); }
+                    fclose(g);
+                }
+                if (first) {
+                    fprintf(q, "minuto  fps   cpu MHz  gpu MHz  temp C\n");
+                }
+                fprintf(q, "%3d:%02d  %4.1f  %5ld    %4ld     %4.1f\n", (int)(tsum / 60), (int)tsum % 60, c[4] / secs, cpu, gpu, temp / 1000.0);
+                fclose(q);
+            }
+            first = 0;
+        }
     }
     {
         static unsigned long long prev[6];
