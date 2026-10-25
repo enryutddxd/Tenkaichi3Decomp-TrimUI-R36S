@@ -1241,6 +1241,75 @@ __attribute__((constructor)) static void malloc_init(void) {
     mallopt(M_ARENA_MAX, 1);
 #endif
 }
+/* (diagnosis, R36S 64-bit: the heap grew in steps of 10, 20, 40, 80 MB over a session, a container doubling, and
+   the game was ended after ~24 min, likely out of memory) every block of 1 MB or more asked of the C library, with
+   who asked (the return address): noted here, written to the log by R36_BigAllocDrain (from the log's thread). */
+#ifdef __aarch64__
+extern void *__libc_malloc(size_t), *__libc_calloc(size_t, size_t), *__libc_realloc(void *, size_t), *__libc_memalign(size_t, size_t);
+static struct { size_t n, old; void *who; char kind; } sBig[64];
+static volatile unsigned sBigW, sBigR;
+unsigned long long gR36BigBytes; /* (for the log) bytes in such blocks asked for in all */
+static inline void big_note(char kind, size_t n, size_t old, void *who) {
+    unsigned w = __atomic_fetch_add(&sBigW, 1, __ATOMIC_RELAXED);
+    sBig[w & 63].n = n; sBig[w & 63].old = old; sBig[w & 63].who = who; sBig[w & 63].kind = kind;
+    __atomic_fetch_add(&gR36BigBytes, (unsigned long long)n, __ATOMIC_RELAXED);
+}
+void *malloc(size_t n) {
+    void *p = __libc_malloc(n);
+    if (n >= (1u << 20)) { big_note('m', n, 0, __builtin_return_address(0)); }
+    return p;
+}
+void *calloc(size_t a, size_t b) {
+    void *p = __libc_calloc(a, b);
+    if (a * b >= (1u << 20)) { big_note('c', a * b, 0, __builtin_return_address(0)); }
+    return p;
+}
+void *realloc(void *o, size_t n) {
+    size_t old = o != NULL ? malloc_usable_size(o) : 0;
+    void *p = __libc_realloc(o, n);
+    if (n >= (1u << 20) && n > old) { big_note('r', n, old, __builtin_return_address(0)); }
+    return p;
+}
+void *memalign(size_t a, size_t n) {
+    void *p = __libc_memalign(a, n);
+    if (n >= (1u << 20)) { big_note('a', n, 0, __builtin_return_address(0)); }
+    return p;
+}
+void *aligned_alloc(size_t a, size_t n) {
+    void *p = __libc_memalign(a, n);
+    if (n >= (1u << 20)) { big_note('a', n, 0, __builtin_return_address(0)); }
+    return p;
+}
+int posix_memalign(void **out, size_t a, size_t n) {
+    void *p = __libc_memalign(a < sizeof(void *) ? sizeof(void *) : a, n);
+    if (p == NULL) { return ENOMEM; }
+    if (n >= (1u << 20)) { big_note('a', n, 0, __builtin_return_address(0)); }
+    *out = p;
+    return 0;
+}
+void R36_BigAllocDrain(void) {
+    extern char __executable_start[];
+    while (sBigR != sBigW) {
+        unsigned r = sBigR;
+        Dl_info di;
+        const char *lib = "?", *sym = "";
+        unsigned long off = 0;
+        void *who = sBig[r & 63].who;
+        if (sBigW - r > 64) { sBigR = sBigW - 64; continue; } /* (overwritten meanwhile) */
+        if (dladdr(who, &di) && di.dli_fname != NULL) {
+            lib = strrchr(di.dli_fname, '/') ? strrchr(di.dli_fname, '/') + 1 : di.dli_fname;
+            off = (unsigned long)((char *)who - (char *)di.dli_fbase);
+            sym = di.dli_sname != NULL ? di.dli_sname : "";
+        }
+        R36_LogLine("r36 mem: a block of %lu KB (%c%s%lu KB before) asked by %s+0x%lx %s (%p); heap blocks of 1 MB+ asked in all: %llu MB\n",
+                    (unsigned long)(sBig[r & 63].n >> 10), sBig[r & 63].kind, sBig[r & 63].kind == 'r' ? ", " : ", ", (unsigned long)(sBig[r & 63].old >> 10),
+                    lib, off, sym, who, gR36BigBytes >> 20);
+        sBigR = r + 1;
+    }
+}
+#else
+void R36_BigAllocDrain(void) {}
+#endif
 __attribute__((constructor)) static void crash_init(void) {
     struct sigaction sa;
     alt_stack();

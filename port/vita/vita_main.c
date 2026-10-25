@@ -557,6 +557,9 @@ void Vita_VBlank(unsigned vblanks) {
                       sLateSum / vb, gVglDraws / perPic, gVglDropped / perPic, gVglBatches / perPic, gVglNewTex, gVitaUsGs / vb, gVitaUsUpload / vb,
                       gVitaUp[3] / vb, gVitaUp[0] / vb, gVitaUp[1] / vb, gVitaUp[2] / vb, gVitaUpStore[0], gVitaUpStore[1] >> 10, gVitaUpStore[2],
                       (unsigned)mi.uordblks >> 10);
+#ifdef PORT_R36S
+                { extern void R36_BigAllocDrain(void); R36_BigAllocDrain(); }
+#endif
                 {   /* the list the drawing thread is on: windows of a fixed range of lists compared build to build */
                     extern unsigned gGsFrame;
                     logf_("vita:   list now %u\n", gGsFrame);
