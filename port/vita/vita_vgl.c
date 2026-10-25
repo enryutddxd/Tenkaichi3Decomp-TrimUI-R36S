@@ -3064,8 +3064,9 @@ static void apply_fixed(const State *s) {
    written, or blended with the source's alpha 0) and cover their rectangle whole: the picture's alpha cleared there
    (and the depth, with ZTST ALWAYS and its write, when all of it is one depth; and the stencil's copy of alpha bit 7)
    by a clear instead of two to eight screens drawn pixel by pixel a picture. bt3.txt aclear=0: drawn as before. */
-#ifdef PORT_R36S64
-int gVitaAClear = 1; /* (the R36S's Mali: as clears, test 12: ~27.8 fps against ~26.8 drawn) */
+#if 0 /* (the R36S's Mali: as clears ~1 fps faster, test 12, but the stage's boundary shield flickered over the
+          buildings near it, test 13; drawn as on the TrimUI: no flicker) */
+int gVitaAClear = 1;
 #else
 int gVitaAClear = 2; /* (2: one rectangle drawn; with the render thread the limit, cheaper than a partial clear: ~70 us each) */
 #endif
