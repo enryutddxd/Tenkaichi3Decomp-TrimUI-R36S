@@ -452,7 +452,7 @@ int gVitaStBk = 1, gVitaStBkAb = 0;
 /* the model parts several to a draw (the batched programs: a loop over 32 slots per vertex); bt3.txt dpbatch, dpbatchab */
 int gVitaDpBatch = 1;
 #ifdef PORT_R36S64
-int gVitaSplitAb = 1; /* (R36S 64-bit test 8: the parts' flushes A/B) */
+int gVitaSplitAb = 0; /* (R36S 64-bit test 8: no difference either way) */
 #else
 int gVitaSplitAb = 0;
 #endif

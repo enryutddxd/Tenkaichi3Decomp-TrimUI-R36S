@@ -343,8 +343,16 @@ char *R36_CgToGlsl(const char *src, int len, int vertex, char *err, int errlen) 
         i = end + 1;
     }
 
-    b_str(&o, "#version 300 es\nprecision highp float;\nprecision highp int;\nprecision mediump sampler2D;\n"
-              "#define saturate(x) clamp((x), 0.0, 1.0)\n");
+    {   /* (R36_FRAG_MP=1, the R36S's launcher: the pixel shaders in medium precision, the Mali's half-float rate) */
+        static int mp = -1;
+        if (mp < 0) {
+            const char *e = getenv("R36_FRAG_MP");
+            mp = e != NULL && atoi(e) > 0;
+        }
+        b_str(&o, !vertex && mp ? "#version 300 es\nprecision mediump float;\nprecision highp int;\nprecision mediump sampler2D;\n"
+                                : "#version 300 es\nprecision highp float;\nprecision highp int;\nprecision mediump sampler2D;\n");
+    }
+    b_str(&o, "#define saturate(x) clamp((x), 0.0, 1.0)\n");
     if (vertex) {
         b_str(&o, "uniform float r36_flip;\n");
     }

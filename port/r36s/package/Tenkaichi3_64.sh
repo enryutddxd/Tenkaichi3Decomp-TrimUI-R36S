@@ -44,6 +44,8 @@ unset SDL_BLITTER_DISABLED
 grep -q '^present=1' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_PRESENT=1 || export R36_PRESENT=0
 # (bt3.txt vsync=0: the swap not held to the screen's refresh; read here, the program reads bt3.txt after the window is made)
 grep -q '^vsync=0' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_VSYNC=0
+# (the pixel shaders in medium precision: the Mali-G31 runs half floats at twice the rate; bt3.txt fragmp=0: full)
+grep -q '^fragmp=0' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_FRAG_MP=0 || export R36_FRAG_MP=1
 
 # the processor and the graphics chip at their full speed while the game runs (put back as they were afterwards)
 GOVS=$(ls /sys/devices/system/cpu/cpufreq/policy*/scaling_governor /sys/class/devfreq/*/governor 2>/dev/null)
