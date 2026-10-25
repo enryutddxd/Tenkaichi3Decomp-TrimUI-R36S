@@ -60,6 +60,30 @@ for g in $GOVS; do
   $ESUDO sh -c "echo performance > $g" 2>/dev/null
   echo "governor $g: ${OLDGOV[$g]} -> $(cat "$g" 2>/dev/null)"
 done
+# Less heat (test 24): the processor and the graphics chip held at a lower top speed, at a lower voltage. A fight
+# brings them there anyway after a few minutes (test 22: 1008 / 400 MHz from minute 12, 22-28 fps, the chip still
+# climbing to 88 C); held lower from the start, the chip runs cooler and the speed steadier. Only the top is
+# lowered: the system's own heat limits stay as they are. bt3.txt cpumax=<MHz> (1008, 1200, 1248, 1296, 1512),
+# gpumax=<MHz> (400, 480, 520); 0 = no cap.
+CPUMAX=$(sed -n 's/^cpumax=\([0-9]*\).*/\1/p' "$GAMEDIR/bt3.txt" 2>/dev/null | tail -1); CPUMAX=${CPUMAX:-1200}
+GPUMAX=$(sed -n 's/^gpumax=\([0-9]*\).*/\1/p' "$GAMEDIR/bt3.txt" 2>/dev/null | tail -1); GPUMAX=${GPUMAX:-400}
+declare -A OLDMAX
+if [ "$CPUMAX" -gt 0 ]; then
+  for f in /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq; do
+    [ -f "$f" ] || continue
+    OLDMAX[$f]=$(cat "$f")
+    $ESUDO sh -c "echo $((CPUMAX * 1000)) > $f" 2>/dev/null
+    echo "processor top: ${OLDMAX[$f]} -> $(cat "$f") kHz"
+  done
+fi
+if [ "$GPUMAX" -gt 0 ]; then
+  for d in /sys/class/devfreq/*gpu*; do
+    [ -f "$d/max_freq" ] || continue
+    OLDMAX[$d/max_freq]=$(cat "$d/max_freq")
+    $ESUDO sh -c "echo $((GPUMAX * 1000000)) > $d/max_freq" 2>/dev/null
+    echo "graphics chip top: ${OLDMAX[$d/max_freq]} -> $(cat "$d/max_freq") Hz"
+  done
+fi
 cat /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq /sys/devices/system/cpu/cpufreq/policy*/scaling_cur_freq /sys/class/devfreq/*/cur_freq 2>/dev/null | tr '\n' ' '; echo "(processor max, now; devfreq now)"
 
 chmod +x "$GAMEDIR/bt3"
@@ -77,6 +101,9 @@ if [ $STATUS -ge 128 ]; then
 fi
 
 $ESUDO kill -9 $(pidof gptokeyb) 2>/dev/null
+for f in "${!OLDMAX[@]}"; do
+  $ESUDO sh -c "echo ${OLDMAX[$f]} > $f" 2>/dev/null
+done
 for g in $GOVS; do
   [ -n "${OLDGOV[$g]}" ] && $ESUDO sh -c "echo ${OLDGOV[$g]} > $g" 2>/dev/null
 done
