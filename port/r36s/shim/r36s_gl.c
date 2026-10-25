@@ -1846,6 +1846,22 @@ static GLuint sUbRing2[3], sUbRing3;
 static uint8_t *sUbMap3;
 static unsigned sUbAt, sUbGen; /* (modes 2, 3: the place in this part; the part's generation as sStreamGen) */
 int gR36UbLim = 1; /* R36_UbLimit followed (bt3.txt ublim) */
+/* (test 25) The blocks in the stream put on a grid of 4 KB, each range bound as one whole step: Mali's driver
+   (libmali, one call site) took 1.25, 2.5 ... 80, 160 MB of the heap in a session, a table doubling each time it
+   filled: likely one entry per uniform range seen (buffer, offset, size), never let go. In the stream the offsets
+   were any multiple of 16 in 18 MB, millions of them; on the grid, 4608 places of one size. R36_UBGRID=0: as before. */
+static unsigned ub_grid(void) {
+    static int g = -1;
+    if (g < 0) {
+        const char *e = getenv("R36_UBGRID");
+        g = e != NULL ? atoi(e) : 4096;
+        if (g != 0 && (g < 256 || (g & (g - 1)) != 0)) {
+            g = 4096;
+        }
+        R36_LogLine("r36 gl: uniform blocks in the stream on a grid of %d bytes\n", g);
+    }
+    return (unsigned)g;
+}
 static void ub_bind(Prog *p) {
     int b, mode = gR36UbMode;
     if (sUbAlign == 0) {
@@ -1880,7 +1896,7 @@ static void ub_bind(Prog *p) {
             uint32_t cs = mode == 3 && p->lim[b] != 0 && gR36UbLim ? p->lim[b] : sz; /* (the bytes copied: the range bound is the whole block still) */
             unsigned part = sStreamPart;
             if (mode == 1) {
-                at = stream_put(p->shadow[b], sz, sUbAlign);
+                at = stream_put(p->shadow[b], sz, ub_grid() ? ub_grid() : sUbAlign);
             } else if (mode == 2 || mode == 3) {
                 unsigned o = (sUbAt + sUbAlign - 1u) / sUbAlign * sUbAlign;
                 if (o + sz <= UB_PART) {
@@ -1924,6 +1940,9 @@ static void ub_bind(Prog *p) {
             }
         }
         buf = p->bbuf[b];
+        if (mode == 1 && ub_grid() && sz <= ub_grid() && p->boff[b] % ub_grid() == 0) {
+            sz = ub_grid(); /* (the range bound: the whole grid step, the block's bytes at its start; see ub_grid) */
+        }
         if (sUbBound[b].buf != buf || sUbBound[b].off != p->boff[b] || sUbBound[b].size != sz) {
             p_glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)b, buf, p->boff[b], sz);
             sUbBound[b].buf = buf;
