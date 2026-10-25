@@ -217,6 +217,7 @@ unsigned long long R36_NowNs(void);
 /* (the present thread, see present_*) the renderer's context made current without the window: the window's surface is the
    present thread's */
 static int sPresentOn;
+extern unsigned gR36Present[3];
 static struct {
     void *dpy, *ctx, *ctxP, *surf;
     unsigned (*MakeCurrent)(void *, void *, void *, void *);
@@ -430,10 +431,15 @@ void R36_GlTimes(FILE *f, double secs) {
                     if (fgets(v, sizeof(v), g) != NULL) { temp = atol(v); }
                     fclose(g);
                 }
+                static unsigned shownPrev;
+                unsigned shown = gR36Present[0];
                 if (first) {
-                    fprintf(q, "minuto  fps   cpu MHz  gpu MHz  temp C\n");
+                    fprintf(q, "minuto  fps   cpu MHz  gpu MHz  temp C  en pantalla\n");
                 }
-                fprintf(q, "%3d:%02d  %4.1f  %5ld    %4ld     %4.1f\n", (int)(tsum / 60), (int)tsum % 60, c[4] / secs, cpu, gpu, temp / 1000.0);
+                /* (en pantalla: the pictures the present thread put on the screen; with it on, dropped ones are drawn and not seen) */
+                fprintf(q, "%3d:%02d  %4.1f  %5ld    %4ld     %4.1f   %4.1f\n", (int)(tsum / 60), (int)tsum % 60, c[4] / secs, cpu, gpu, temp / 1000.0,
+                        sPresentOn ? (shown - shownPrev) / secs : c[4] / secs);
+                shownPrev = shown;
                 fclose(q);
             }
             first = 0;
@@ -2649,7 +2655,11 @@ static void present_post(int b, GLuint tex, int w, int h, float aspect) {
     pthread_mutex_unlock(&sPrLock);
 }
 /* (render context) buffer b about to be drawn into: not while it is shown */
+#ifdef PORT_R36S64 /* (test 26: with the present thread on, 15-40 % of the pictures drawn were dropped, test 24: drawn, not seen, heat for nothing) */
+int gR36NoDrop = 1;
+#else
 int gR36NoDrop = 0; /* every picture shown, in turn (a queue of two at most): none dropped for a newer one */
+#endif
 static void present_claim(int b) {
     GLsync rd = NULL;
     pthread_mutex_lock(&sPrLock);
