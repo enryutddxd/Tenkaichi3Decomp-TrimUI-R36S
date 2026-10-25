@@ -171,8 +171,16 @@ static inline void r_use(GLuint p) {
         sEv |= 2;
     }
 }
+static int sSwapPending;            /* (the late swap, below) */
+static unsigned long long sSwapAt;
+extern int gR36SwapLate;
+unsigned long long sceKernelGetProcessTimeWide(void);
+static void swap_now(int atEnd);
 static inline void r_fbo(GLuint f) {
     if (rFbo != f) {
+        if (sSwapPending && sceKernelGetProcessTimeWide() - sSwapAt >= (unsigned long long)gR36SwapLate * 1000ull) {
+            swap_now(0); /* (a target left anyway: its scene ends here, the swap's flush splits nothing) */
+        }
         p_glBindFramebuffer(GL_FRAMEBUFFER, f);
         rFbo = f;
         gR36Chg[1]++;
@@ -1992,21 +2000,19 @@ int gR36SwapLate = 10; /* (R36S 64-bit test 11: 25-28 fps in fights against 23-2
 #else
 int gR36SwapLate;
 #endif
-static int sSwapPending;
-static unsigned long long sSwapAt;
-unsigned gR36SwapLateN[2]; /* (for the log) swaps made late in the next picture, at its end */
+unsigned gR36SwapLateN[3]; /* (for the log) swaps made late in the next picture, at its end */
 static void swap_now(int atEnd) {
     if (sSwapPending) {
         sSwapPending = 0;
         SDL_GL_SwapWindow(sWin);
-        gR36SwapLateN[atEnd ? 1 : 0]++;
+        gR36SwapLateN[atEnd]++;
     }
 }
 static GLboolean sDepthW = GL_TRUE;
 static void pre_draw(void) {
     gR36Draws++;
-    if (sSwapPending && sceKernelGetProcessTimeWide() - sSwapAt >= (unsigned long long)gR36SwapLate * 1000ull) {
-        swap_now(0);
+    if (sSwapPending && sceKernelGetProcessTimeWide() - sSwapAt >= (unsigned long long)gR36SwapLate * 2000ull) {
+        swap_now(2); /* (no target change came in time: here, in the middle of a scene) */
     }
     if (sOnDisp && sCapDepth && sDepthW) {
         gR36DepthW++;
