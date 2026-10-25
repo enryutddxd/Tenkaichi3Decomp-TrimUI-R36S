@@ -8026,10 +8026,29 @@ const void *gVglPlan; /* gs_core.c sets it for the strip being drawn (the back e
    the back end must wait for the chip before anything is written over (a record in the queue says so). */
 unsigned gVitaChipGen = 1;
 unsigned gVglConstGen; /* counts the times the back end took new strip constants */
+/* The fighters' buffer on the chip only grows during a fight: a strip whose vertices change (another pose kept in
+   place, a transformation, the other fighter of a team) is written again behind the rest, its old place not given
+   back. After some minutes (R36S: 5-6 of a fight) it is full and every fighter strip from then on goes the long
+   way: ~2000 draws a picture, 7 fps and less. Full, it is let go and filled again (as at a fight's end). */
+static int sFtFullDue;
+static unsigned sFtFullFrame;
+unsigned gVitaFtResets; /* (for the log) */
 int Vita_ChipResetDue(void) {
     extern int Vita_InBattle(void);
     static int was;
     int now = Vita_InBattle(), r = 0;
+    if (sFtFullDue && now) {
+        memset(sFtCache, 0, sizeof(sFtCache));
+        sFtUsed = 0;
+        sFtIdxUsed = 0;
+        sFtFullDue = 0;
+        sFtFullFrame = gGsFrame;
+        gVitaFtResets++;
+        gVitaChipGen++; /* (gs_core.c: the replayed calls refer to the buffer let go) */
+        was = now;
+        return 1;
+    }
+    sFtFullDue = 0;
     if (was && !now && (sStageUsed != 0 || sFtUsed != 0)) {
         memset(sStageCache, 0, sizeof(sStageCache));
         sStageUsed = 0;
@@ -8140,6 +8159,9 @@ int Vita_ChipPlan(int which, int layer, const float *v, uint32_t count, const fl
                 h = ((uint32_t)(uintptr_t)v * 0x9E3779B1u ^ count) >> 19;
             }
             if (sFtUsed + count > FT_VERTS || sFtIdxUsed + need > FT_IDX) {
+                if (gGsFrame - sFtFullFrame > 600u) { /* (not more than once in 10 s: a fight that needs it all goes the long way) */
+                    sFtFullDue = 1; /* (let go at the next strip: Vita_ChipResetDue) */
+                }
                 return -1;
             }
             sFtCache[h].src = v; sFtCache[h].count = count; sFtCache[h].sig = sig; sFtCache[h].at = sFtUsed; sFtCache[h].seen = gGsFrame;
