@@ -418,10 +418,13 @@ static char *dp_batch_src(const char *src, int slot, int k, int nu) {
     body += 4;
     memcpy(w, p, (size_t)(body - p));
     w += body - p;
+    /* (the slot whose range holds the vertex: the ranges do not overlap, so the first that does; the loop stops
+       there and at the slots in use, not after all of them: per vertex, the R36S's Mali spent its time here) */
     w += sprintf(w, "    float r36vid = (float)gl_VertexID;\n    int r36s = 0;\n    int r36k;\n    float r36n = U[%d].z;\n"
                     "    for (r36k = 0; r36k < %d; r36k++) {\n"
+                    "        if ((float)r36k >= r36n) { break; }\n"
                     "        float4 r36r = U[r36k * %d + %d];\n"
-                    "        if ((float)r36k < r36n && r36vid >= r36r.x && r36vid <= r36r.y) { r36s = r36k; }\n"
+                    "        if (r36vid >= r36r.x && r36vid <= r36r.y) { r36s = r36k; break; }\n"
                     "    }\n    int r36b = r36s * %d;\n", slot - 1, k, slot, slot - 1, slot);
     for (p = body; *p;) {
         if (p[0] == 'U' && p[1] == '[' && (p == src || !(isalnum((unsigned char)p[-1]) || p[-1] == '_'))) {
