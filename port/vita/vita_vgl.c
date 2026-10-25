@@ -452,6 +452,11 @@ int gVitaStBk = 1, gVitaStBkAb = 0;
 /* the model parts several to a draw (the batched programs: a loop over 32 slots per vertex); bt3.txt dpbatch, dpbatchab */
 int gVitaDpBatch = 1;
 #ifdef PORT_R36S64
+int gVitaSwapLateAb = 1; /* (R36S 64-bit test 11) */
+#else
+int gVitaSwapLateAb = 0;
+#endif
+#ifdef PORT_R36S64
 int gVitaSplitAb = 0; /* (R36S 64-bit test 8: no difference either way) */
 #else
 int gVitaSplitAb = 0;
@@ -6972,6 +6977,11 @@ void GsGpu_FrameEnd(void) {
             extern volatile unsigned gR36ProfWindow;
             extern int gR36UbMode;
             gR36UbMode = 1 + (int)(gR36ProfWindow % 4u);
+        }
+        if (gVitaSwapLateAb) { /* in turn: the swap 10 ms into the next picture; at once */
+            extern volatile unsigned gR36ProfWindow;
+            extern int gR36SwapLate;
+            gR36SwapLate = (gR36ProfWindow & 1) == 0 ? 10 : 0;
         }
         if (gVitaSplitAb) { /* in turn: the picture handed to the GPU in parts; whole */
             extern volatile unsigned gR36ProfWindow;

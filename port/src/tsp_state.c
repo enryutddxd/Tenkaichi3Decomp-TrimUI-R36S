@@ -58,6 +58,12 @@ void R36_GameState(FILE *f) {
         extern unsigned gVitaPsw[4], gVitaStBkN;
         extern int gVitaStBk, gVitaStBkAb;
         static unsigned pw[4], pn;
+        extern int gVitaSwapLateAb, gR36SwapLate;
+        extern unsigned gR36SwapLateN[2];
+        static unsigned psl[2];
+        fprintf(f, "  swap made late: %d ms%s; %u swaps in the next picture, %u at its end\n", gR36SwapLate, gVitaSwapLateAb ? " (A/B, 10 s each)" : "",
+                gR36SwapLateN[0] - psl[0], gR36SwapLateN[1] - psl[1]);
+        memcpy(psl, gR36SwapLateN, sizeof(psl));
         extern int gVitaSplitAb, gR36Split;
         fprintf(f, "  picture handed to the GPU in parts: %s%s\n", gR36Split ? "on" : "off", gVitaSplitAb ? " (A/B, 10 s each)" : "");
         extern int gVitaDpBatch, gVitaDpBatchAb;

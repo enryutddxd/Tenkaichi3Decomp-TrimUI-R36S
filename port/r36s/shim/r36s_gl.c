@@ -1983,9 +1983,27 @@ static void draw_done(unsigned long long t0) {
     }
     sEv = 0;
 }
+/* (the R36S: no present thread there) the swap made late, a few ms into the next picture's draws: the swap waits for
+   the GPU to end the picture, ~13 ms after its last draw on the Mali, during which nothing was drawn. The picture is
+   drawn onto the window at once; the swap itself when the next picture's first draws are with the GPU (pre_draw) or
+   at the next picture's end at the latest. gR36SwapLate: ms after the picture's end, 0 off. */
+int gR36SwapLate;
+static int sSwapPending;
+static unsigned long long sSwapAt;
+unsigned gR36SwapLateN[2]; /* (for the log) swaps made late in the next picture, at its end */
+static void swap_now(int atEnd) {
+    if (sSwapPending) {
+        sSwapPending = 0;
+        SDL_GL_SwapWindow(sWin);
+        gR36SwapLateN[atEnd ? 1 : 0]++;
+    }
+}
 static GLboolean sDepthW = GL_TRUE;
 static void pre_draw(void) {
     gR36Draws++;
+    if (sSwapPending && sceKernelGetProcessTimeWide() - sSwapAt >= (unsigned long long)gR36SwapLate * 1000ull) {
+        swap_now(0);
+    }
     if (sOnDisp && sCapDepth && sDepthW) {
         gR36DepthW++;
     }
@@ -2324,6 +2342,7 @@ GLboolean vglInitExtended(int legacy_pool_size, int width, int height, int ram_t
 /* the finished buffer on the screen: the picture as large as fits with its own shape, turned the right way up */
 static float sAspect = 0.0f; /* (the shape the picture is shown at, width / height; 0: the display buffer's) */
 void R36_SetAspect(float a) { sAspect = a; }
+static int sTexLate;
 static void present_tex(GLuint tex, int w, int h, int flipped) {
     static const float kQuad[8] = {-1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f};
     float a = sAspect > 0.0f ? sAspect : (float)w / (float)h, sw = 1.0f, sh = 1.0f;
@@ -2354,6 +2373,12 @@ static void present_tex(GLuint tex, int w, int h, int flipped) {
     r_attr_on(2, 0);
     r_attr_on(3, 0);
     p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    if (sTexLate) {
+        p_glFlush();
+        sSwapPending = 1;
+        sSwapAt = sceKernelGetProcessTimeWide();
+        return;
+    }
     SDL_GL_SwapWindow(sWin);
 }
 /* ---- the present thread ----
@@ -2680,7 +2705,10 @@ void vglSwapBuffers(GLboolean has_commondialog) {
         if (sPresentOn) {
             present_post((int)done, sDispTex[done], sDispW, sDispH, sAspect);
         } else {
+            swap_now(1);
+            sTexLate = gR36SwapLate > 0;
             present_tex(sDispTex[done], sDispW, sDispH, 1);
+            sTexLate = 0;
         }
         t1 = sceKernelGetProcessTimeWide();
         sumPresent += t1 - t0;

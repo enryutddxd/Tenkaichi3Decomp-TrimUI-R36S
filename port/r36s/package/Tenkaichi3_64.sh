@@ -46,8 +46,8 @@ grep -q '^present=1' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_PRESENT=1 || e
 grep -q '^vsync=0' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_VSYNC=0
 # (bt3.txt fragmp=1: the pixel shaders in medium precision; test 9: no faster)
 grep -q '^fragmp=1' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_FRAG_MP=1 || export R36_FRAG_MP=0
-# (test 10: the GPU's own time per picture measured, glFinish before the swap; bt3.txt gpufin=0: not)
-grep -q '^gpufin=0' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_GPUFIN=0 || export R36_GPUFIN=1
+# (bt3.txt gpufin=1: the GPU's own time per picture measured, glFinish before the swap; test 10: ~13 ms after the last draw)
+grep -q '^gpufin=1' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_GPUFIN=1 || export R36_GPUFIN=0
 
 # the processor and the graphics chip at their full speed while the game runs (put back as they were afterwards)
 GOVS=$(ls /sys/devices/system/cpu/cpufreq/policy*/scaling_governor /sys/class/devfreq/*/governor 2>/dev/null)
