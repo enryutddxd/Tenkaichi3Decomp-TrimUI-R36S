@@ -3388,7 +3388,15 @@ static void flush_impl(const FlushIn *in) {
                     extern GLuint R36_StreamBuf(void), R36_ElemBuf(void);
                     long at = R36_ElemBuf() == 0 ? R36_Stream(in->idx, (size_t)in->idxCount * 2u) : -1;
                     if (at >= 0) {
+                        extern void R36_IdxRange(unsigned lo, unsigned hi);
+                        unsigned lo = 0xFFFFu, hi = 0, j;
+                        for (j = 0; j < (unsigned)in->idxCount; j++) {
+                            unsigned v = ((const uint16_t *)in->idx)[j];
+                            lo = v < lo ? v : lo;
+                            hi = v > hi ? v : hi;
+                        }
                         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, R36_StreamBuf());
+                        R36_IdxRange(lo, hi);
                         glDrawElements(GL_TRIANGLES, in->idxCount, GL_UNSIGNED_SHORT, (const void *)(uintptr_t)at);
                         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
                     } else {
@@ -3410,6 +3418,7 @@ static void flush_impl(const FlushIn *in) {
             extern long R36_Stream(const void *data, size_t n), R36_Stream32(const void *data, size_t n);
             extern GLuint R36_StreamBuf(void), R36_ElemBuf(void);
             extern int gR36Opt, R36_DrawElementsBase(GLenum mode, GLsizei count, GLenum type, long off, GLint base);
+            extern void R36_IdxRange(unsigned lo, unsigned hi);
             long vo = gR36Opt ? R36_Stream32(in->verts, (size_t)in->vertCount * sizeof(V)) : R36_Stream(in->verts, (size_t)in->vertCount * sizeof(V)), io = 0;
             if (gR36Opt && vo >= 0 && (in->idx == NULL || (io = R36_Stream(in->idx, (size_t)in->idxCount * 2u)) >= 0)) {
                 /* the attributes at the stream's start, as for the draw before: the draw says where its vertices begin */
@@ -3424,6 +3433,7 @@ static void flush_impl(const FlushIn *in) {
                     glDrawArrays(s->topo ? GL_LINES : GL_TRIANGLES, first, in->vertCount);
                     goto drawn;
                 }
+                R36_IdxRange(0, in->vertCount - 1u); /* (the GS's triangles: indices into their own vertices) */
                 if (R36_DrawElementsBase(GL_TRIANGLES, in->idxCount, GL_UNSIGNED_SHORT, io, first)) {
                     goto drawn;
                 }
@@ -3434,6 +3444,7 @@ static void flush_impl(const FlushIn *in) {
                 {
                     GLuint prev = R36_ElemBuf();
                     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sb);
+                    R36_IdxRange(0, in->vertCount - 1u);
                     glDrawElements(GL_TRIANGLES, in->idxCount, GL_UNSIGNED_SHORT, (const void *)(uintptr_t)io);
                     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, prev);
                 }
@@ -9571,13 +9582,22 @@ static void dpb_flush(int n, int slot, const uint16_t *const *src, const uint32_
         extern long R36_Stream(const void *data, size_t n);
         extern GLuint R36_StreamBuf(void);
         long at;
+        extern void R36_IdxRange(unsigned lo, unsigned hi);
+        unsigned lo = 0xFFFFu, hi = 0;
         for (o = ix, k = 0; k < n; k++) {
+            uint32_t j;
             memcpy(o, src[k], cnt[k] * 2);
+            for (j = 0; j < cnt[k]; j++) { /* (their range, for the driver: R36_IdxRange) */
+                unsigned v = o[j];
+                lo = v < lo ? v : lo;
+                hi = v > hi ? v : hi;
+            }
             o += cnt[k];
         }
         at = R36_Stream(ix, (size_t)total * 2u); /* (into the stream: the driver does not copy them from memory) */
         if (at >= 0) {
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, R36_StreamBuf());
+            R36_IdxRange(lo, hi);
             glDrawElements(GL_TRIANGLES, (GLsizei)total, GL_UNSIGNED_SHORT, (const void *)(uintptr_t)at);
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         } else {

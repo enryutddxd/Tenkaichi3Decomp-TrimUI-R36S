@@ -49,8 +49,8 @@ grep -q '^vsync=0' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_VSYNC=0
 grep -q '^fragmp=1' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_FRAG_MP=1 || export R36_FRAG_MP=0
 # (bt3.txt gpufin=1: the GPU's own time per picture measured, glFinish before the swap; test 10: ~13 ms after the last draw)
 grep -q '^gpufin=1' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_GPUFIN=1 || export R36_GPUFIN=0
-# (bt3.txt ubgrid=0: the uniform blocks in the stream at any place, as before test 25; ubgrid=1024 etc. another grid)
-UBGRID=$(sed -n 's/^ubgrid=\([0-9]*\).*/\1/p' "$GAMEDIR/bt3.txt" 2>/dev/null | tail -1); export R36_UBGRID=${UBGRID:-4096}
+# (bt3.txt ubgrid=4096: the uniform blocks in the stream on a grid (test 25-26; did not stop the heap growing), off by default)
+UBGRID=$(sed -n 's/^ubgrid=\([0-9]*\).*/\1/p' "$GAMEDIR/bt3.txt" 2>/dev/null | tail -1); export R36_UBGRID=${UBGRID:-0}
 # (bt3.txt ubo=0: the shaders' uniforms as plain uniforms, not in blocks; test 18: slower, 22-28 fps against 28-30)
 grep -q '^ubo=0' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_UBO=0 || export R36_UBO=1
 

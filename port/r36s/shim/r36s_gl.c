@@ -68,6 +68,8 @@ extern void R36_LogLine(const char *fmt, ...);
     X(void, glVertexAttrib4f, (GLuint, GLfloat, GLfloat, GLfloat, GLfloat)) X(void, glViewport, (GLint, GLint, GLsizei, GLsizei)) \
     X(void, glBindVertexArray, (GLuint)) X(void *, glMapBufferRange, (GLenum, GLintptr, GLsizeiptr, GLbitfield)) X(GLboolean, glUnmapBuffer, (GLenum)) \
     X(void, glDrawElementsBaseVertex, (GLenum, GLsizei, GLenum, const void *, GLint)) \
+    X(void, glDrawRangeElements, (GLenum, GLuint, GLuint, GLsizei, GLenum, const void *)) \
+    X(void, glDrawRangeElementsBaseVertex, (GLenum, GLuint, GLuint, GLsizei, GLenum, const void *, GLint)) \
     X(void, glWaitSync, (GLsync, GLbitfield, GLuint64)) X(void, glInvalidateFramebuffer, (GLenum, GLsizei, const GLenum *)) \
     X(void, glBindBufferRange, (GLenum, GLuint, GLuint, GLintptr, GLsizeiptr)) X(GLuint, glGetUniformBlockIndex, (GLuint, const GLchar *)) \
     X(void, glUniformBlockBinding, (GLuint, GLuint, GLuint)) X(void, glGetActiveUniformsiv, (GLuint, GLsizei, const GLuint *, GLenum, GLint *)) \
@@ -1860,7 +1862,7 @@ static unsigned ub_grid(void) {
     static int g = -1;
     if (g < 0) {
         const char *e = getenv("R36_UBGRID");
-        g = e != NULL ? atoi(e) : 4096;
+        g = e != NULL ? atoi(e) : 0; /* (test 26: the heap's growth not stopped; off) */
         if (g != 0 && (g < 256 || (g & (g - 1)) != 0)) {
             g = 4096;
         }
@@ -2139,6 +2141,34 @@ void r36_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
     }
     LEAVE();
 }
+/* (test 27) The next draw's indices, lowest and highest, from vita_vgl.c: the draw made with glDrawRangeElements.
+   Mali's driver took 1.25, 2.5 ... 80, 160 MB of the heap in a session from one place, a table doubling as it filled
+   (out of memory after ~24 min), test 25's uniform grid not the cause: likely the range of indices it worked out and
+   kept for every (buffer, place, count) of indices drawn, ~3000 new places a second in the stream, never let go.
+   Given the range, the driver need not work it out. R36_IDXRANGE=0: as before. */
+static int sIdxHint, sIdxRangeOn = -1;
+static GLuint sIdxLo, sIdxHi;
+unsigned gR36IdxRange[2]; /* (for the log) draws given their range, not */
+void R36_IdxRange(unsigned lo, unsigned hi) {
+    if (sIdxRangeOn < 0) {
+        const char *e = getenv("R36_IDXRANGE");
+        sIdxRangeOn = e == NULL || atoi(e) != 0;
+        R36_LogLine("r36 gl: draws given the range of their indices: %s\n", sIdxRangeOn ? "on" : "off");
+    }
+    sIdxHint = sIdxRangeOn && lo <= hi;
+    sIdxLo = lo;
+    sIdxHi = hi;
+}
+static inline void draw_elems(GLenum mode, GLsizei count, GLenum type, const void *idx) {
+    if (sIdxHint && p_glDrawRangeElements != NULL) {
+        p_glDrawRangeElements(mode, sIdxLo, sIdxHi, count, type, idx);
+        gR36IdxRange[0]++;
+    } else {
+        p_glDrawElements(mode, count, type, idx);
+        gR36IdxRange[1]++;
+    }
+    sIdxHint = 0;
+}
 void r36_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *idx) {
     ENTER();
     site_note((uintptr_t)__builtin_return_address(0));
@@ -2150,8 +2180,9 @@ void r36_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *idx
         ff_end();
     } else {
         r_bind(GL_ELEMENT_ARRAY_BUFFER, sElemBuf);
-        { unsigned long long dt0_ = draw_t0(); p_glDrawElements(mode, count, type, idx); draw_done(dt0_); }
+        { unsigned long long dt0_ = draw_t0(); draw_elems(mode, count, type, idx); draw_done(dt0_); }
     }
+    sIdxHint = 0;
     LEAVE();
 }
 /* (vita_vgl.c) the bound target's colour not needed (all of it is drawn next): the GPU does not load it. R36_DISCARD=0: not */
@@ -2257,7 +2288,18 @@ int R36_DrawElementsBase(GLenum mode, GLsizei count, GLenum type, long off, GLin
     site_note((uintptr_t)__builtin_return_address(0));
     pre_draw();
     r_bind(GL_ELEMENT_ARRAY_BUFFER, sStreamBuf);
-    { unsigned long long dt0_ = draw_t0(); p_glDrawElementsBaseVertex(mode, count, type, (const void *)(uintptr_t)off, base); draw_done(dt0_); }
+    {
+        unsigned long long dt0_ = draw_t0();
+        if (sIdxHint && p_glDrawRangeElementsBaseVertex != NULL) {
+            p_glDrawRangeElementsBaseVertex(mode, sIdxLo, sIdxHi, count, type, (const void *)(uintptr_t)off, base);
+            gR36IdxRange[0]++;
+        } else {
+            p_glDrawElementsBaseVertex(mode, count, type, (const void *)(uintptr_t)off, base);
+            gR36IdxRange[1]++;
+        }
+        sIdxHint = 0;
+        draw_done(dt0_);
+    }
     if (!gR36Opt) {
         r_bind(GL_ELEMENT_ARRAY_BUFFER, sElemBuf);
     }
