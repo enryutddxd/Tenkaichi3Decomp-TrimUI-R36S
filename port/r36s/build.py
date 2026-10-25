@@ -32,14 +32,16 @@ V = ROOT / "port/vita"
 # BT3_PLATFORM=tsp: the TrimUI Smart Pro (stock firmware, through PortMaster): a 64-bit ARM program (its GPU driver is
 # 64-bit only), with the game's pointers kept 4 bytes wide as in the PC's 64-bit build (port/tools/ptr32.py, irfix.py:
 # every pointer of the game's text is `* __ptr32 __uptr`, all game memory below 4 GB). See port/trimui/README.md.
-TSP = os.environ.get("BT3_PLATFORM", "r36s") == "tsp"
-PLAT = "tsp" if TSP else "r36s"
+PLAT = os.environ.get("BT3_PLATFORM", "r36s")  # r36s (32-bit ARM), r36s64 (the R36S as a 64-bit program, as the TrimUI's), tsp
+TSP = PLAT == "tsp"
+A64 = PLAT in ("tsp", "r36s64")  # (a 64-bit program: the game's pointers kept 4 bytes wide, see below)
 OBJ = ROOT / f"port/build/obj_{PLAT}"
 OUT = ROOT / f"port/build/{PLAT}"
 GEN = ROOT / f"port/build/gen/{PLAT}"
 ZIG = shlex.split(os.environ.get("BT3_R36S_ZIG", f"{shlex.quote(sys.executable)} -m ziglang"))
-BU = os.environ.get("BT3_R36S_BINUTILS", "aarch64-linux-gnu-" if TSP else "arm-linux-gnueabihf-")
-TARGET = ["-target", "aarch64-linux-gnu.2.33", "-mcpu=cortex_a53"] if TSP else ["-target", "arm-linux-gnueabihf.2.28", "-mcpu=cortex_a35-neon"]
+BU = os.environ.get("BT3_R36S_BINUTILS", "aarch64-linux-gnu-" if A64 else "arm-linux-gnueabihf-")
+TARGET = ["-target", "aarch64-linux-gnu.2.33", "-mcpu=cortex_a53"] if TSP else \
+         ["-target", "aarch64-linux-gnu.2.28", "-mcpu=cortex_a35"] if A64 else ["-target", "arm-linux-gnueabihf.2.28", "-mcpu=cortex_a35-neon"]
 CC = ZIG + ["cc"] + TARGET
 CXX = ZIG + ["c++"] + TARGET
 
@@ -66,7 +68,7 @@ COMMON = FPU + ["-O2", "-g", "-fno-strict-aliasing", "-ffp-contract=off", "-w", 
           "-Wno-error=incompatible-pointer-types", "-Wno-error=return-type", "-Wno-error=int-to-pointer-cast",
           "-DPORT_VITA=1", "-DPORT_VITA_FIXED=1", "-DPORT_R36S=1", '-DPORT_VITA_SFX=".txt"', "-DPORT_VITA_GFX=1", "-DPORT_VITA_VGL=1",
           "-DMPEG2_PLAYER=1", "-DPORT_VITA_SOUND=1", "-DPORT_VITA_NATIVE=1", "-DPORT_VITA_RELEASE=1"] + \
-         (["-DPORT_TSP=1", "-fms-extensions"] if TSP else [])
+         (["-DPORT_TSP=1", "-DPORT_A64=1", "-fms-extensions"] if TSP else ["-DPORT_R36S64=1", "-DPORT_A64=1", "-fms-extensions"] if A64 else [])
 # (the 64-bit build's parse of the preprocessed text: ptr32.transform, srcfix.shifts)
 P64_ARGS = ["-x", "cpp-output", "--target=aarch64-linux-gnu", "-std=gnu99", "-fsigned-char", "-fno-short-enums", "-fms-extensions", "-w",
             "-Wno-error=return-type", "-Wno-error=return-mismatch", "-Wno-error=int-conversion", "-Wno-error=incompatible-pointer-types",
@@ -131,7 +133,7 @@ def compile_ee(cmd, src, o, game=False, ee=True, p32=True):
         return r
     i = pathlib.Path(str(o)[:-2] + ".i")
     text = eeconst.transform(r.stdout) if ee else r.stdout
-    if TSP and p32:
+    if A64 and p32:
         try:
             text = p64(text, i, game)
         except Exception as e:
@@ -152,7 +154,7 @@ def compile_ee(cmd, src, o, game=False, ee=True, p32=True):
             skip = True
         elif not a.startswith("-D"):
             cc2.append(a)
-    if TSP:  # through LLVM IR: irfix.py repairs what the code generator cannot select for 4-byte pointers
+    if A64:  # through LLVM IR: irfix.py repairs what the code generator cannot select for 4-byte pointers
         import irfix
         ll = pathlib.Path(str(o)[:-2] + ".ll")
         r = run([a for a in cc2 if a != "-c"] + ["-S", "-emit-llvm", "-x", "c", str(i), "-o", str(ll)])
@@ -222,7 +224,7 @@ def data_tables():
         s = GEN / (name + ".s")
         s.write_text("\n".join(lines) + "\n")
         o = OBJ / ("data_" + re.sub(r"\W", "_", name) + ".o")
-        r = rename(run([BU + "as"] + ([] if TSP else ["-mfloat-abi=hard", "-mfpu=vfpv3"]) + [str(s), "-o", str(o)]), o)
+        r = rename(run([BU + "as"] + ([] if A64 else ["-mfloat-abi=hard", "-mfpu=vfpv3"]) + [str(s), "-o", str(o)]), o)
         if r.returncode:
             print("FAILED", name, r.stderr.splitlines()[0][:200])
         else:
@@ -258,7 +260,7 @@ def port_sources():
 # objects' C library calls get their versions there); GCC's C library headers are newer, so nothing that would pick
 # newer entry points (fortify, C2x names) is on. BT3_GCC=0: clang for these too.
 GCC = os.environ.get("BT3_R36S_GCC", BU + "gcc")
-USE_GCC = os.environ.get("BT3_GCC", "1") != "0" and shutil.which(GCC) is not None and not TSP
+USE_GCC = os.environ.get("BT3_GCC", "1") != "0" and shutil.which(GCC) is not None and not A64
 GCC_FLAGS = ["-U_TIME_BITS", "-U_FILE_OFFSET_BITS", "-mcpu=cortex-a35", "-mfpu=neon-fp-armv8", "-mfloat-abi=hard", "-marm", "-fno-pie", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0",
              "-fno-stack-protector", "-fno-stack-clash-protection", "-freorder-blocks-and-partition"]
 GCC_DROP = ("-Wno-error=incompatible-function-pointer-types", "-Wno-error=int-conversion", "-Wno-error=implicit-function-declaration",
@@ -276,7 +278,7 @@ def cc_port(item):
             base += ["-mfpu=vfpv4", "-fno-tree-vectorize", "-fno-tree-slp-vectorize"]
     if fresh(o, f):
         return o, f, ""
-    if TSP and kind in ("gs", "hard", "vu0"):  # (through the 64-bit build's rewriting: the game's headers they include)
+    if A64 and kind in ("gs", "hard", "vu0"):  # (through the 64-bit build's rewriting: the game's headers they include)
         if kind == "gs":
             cmd = base + ["-O3", "-include", "r36s_force.h", "-include", "vita_cold.h", "-Dgetenv=Vita_GsGetenv"] + SHIM_INC + \
                   [f"-I{ROOT / 'port/src/gs'}", f"-I{V / 'sdlshim'}"]
@@ -294,7 +296,7 @@ def cc_port(item):
         r = run(base + ["-O3", "-include", "r36s_force.h", "-include", "vita_cold.h", "-Dgetenv=Vita_GsGetenv"] + SHIM_INC +
                 [f"-I{ROOT / 'port/src/gs'}", f"-I{V / 'sdlshim'}", str(f), "-o", str(o)])
     elif kind == "hard":
-        if f.name in NEON_FILES and not USE_GCC and not TSP:
+        if f.name in NEON_FILES and not USE_GCC and not A64:
             base = base + ["-mcpu=cortex_a35"]
         r = run(base + ["-O3", "-include", "r36s_force.h", "-include", "vita_cold.h"] + SHIM_INC + [f"-I{GEN}", str(f), "-o", str(o)])
     elif kind == "shim":
@@ -380,7 +382,7 @@ def sdl_stub():
     return so
 
 
-LIBGCC = next(iter(sorted(pathlib.Path("/usr/lib/gcc-cross/" + ("aarch64-linux-gnu" if TSP else "arm-linux-gnueabihf")).glob("*/libgcc.a"))), "")  # (apt: gcc-arm-linux-gnueabihf / gcc-aarch64-linux-gnu)
+LIBGCC = next(iter(sorted(pathlib.Path("/usr/lib/gcc-cross/" + ("aarch64-linux-gnu" if A64 else "arm-linux-gnueabihf")).glob("*/libgcc.a"))), "")  # (apt: gcc-arm-linux-gnueabihf / gcc-aarch64-linux-gnu)
 
 
 def link_cmd(objs, extra):
@@ -419,7 +421,7 @@ def package():
     pkg = OUT / "package"
     if pkg.exists():
         shutil.rmtree(pkg)
-    game = pkg / ("Data/ports/bt3" if TSP else "ports/bt3")
+    game = pkg / ("Data/ports/bt3" if TSP else "ports/bt3_64" if A64 else "ports/bt3")
     (game / "disc").mkdir(parents=True)
     shutil.copy(OUT / "bt3", OUT / "bt3.unstripped")  # (for reading crash.txt)
     shutil.copy(OUT / "bt3", game / "bt3")
@@ -436,10 +438,10 @@ def package():
     (game / "bt3.sym").write_text("".join(sym))
     os.chmod(game / "bt3", 0o755)
     P = ROOT / "port/trimui/package" if TSP else R / "package"
-    sh = pkg / ("Roms/PORTS" if TSP else "ports") / "Dragon Ball Z Budokai Tenkaichi 3.sh"
+    sh = pkg / ("Roms/PORTS" if TSP else "ports") / ("Dragon Ball Z Budokai Tenkaichi 3 (64-bit).sh" if A64 and not TSP else "Dragon Ball Z Budokai Tenkaichi 3.sh")
     sh.parent.mkdir(parents=True, exist_ok=True)
     REL = TSP and os.environ.get("BT3_RELEASE") == "1"  # (the release: the clean launcher, no measurements, no App folder)
-    shutil.copy(P / ("Tenkaichi3_release.sh" if REL else "Tenkaichi3.sh"), sh)
+    shutil.copy(P / ("Tenkaichi3_release.sh" if REL else "Tenkaichi3_64.sh" if A64 and not TSP else "Tenkaichi3.sh"), sh)
     os.chmod(sh, 0o755)
     shutil.copy(P / "README.txt", game / "README.txt")
     if TSP and not REL:  # (also as a TrimUI App: started without PortMaster)
@@ -454,7 +456,7 @@ def package():
         shutil.copy(ROOT / "THIRD_PARTY.md", game / "THIRD_PARTY.txt")
     else:
         shutil.copy(ROOT / "LICENSE", game / "LICENSE.txt")
-    zipname = OUT / (("Tenkaichi3Decomp-TrimUI-release.zip" if REL else "Tenkaichi3Decomp-TrimUI.zip") if TSP else "Tenkaichi3Decomp-R36S.zip")
+    zipname = OUT / (("Tenkaichi3Decomp-TrimUI-release.zip" if REL else "Tenkaichi3Decomp-TrimUI.zip") if TSP else "Tenkaichi3Decomp-R36S-64.zip" if A64 else "Tenkaichi3Decomp-R36S.zip")
     if zipname.exists():
         zipname.unlink()
     subprocess.run(["zip", "-qr", str(zipname)] + ((["Roms", "Data"] if REL else ["Roms", "Data", "Apps"]) if TSP else ["ports"]), cwd=pkg, check=True)

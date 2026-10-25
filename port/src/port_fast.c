@@ -132,7 +132,7 @@ s32 __wrap_StgFrustum_TestPart(StgPart *part, StgFrustum *fr) {
 }
 
 /* ---- the effects' task lists, timed by callback ---- */
-#ifdef PORT_TSP /* (64 bits: the game's own pointers are 4 bytes wide) */
+#ifdef PORT_A64 /* (64 bits: the game's own pointers are 4 bytes wide) */
 #define GPTR * __ptr32 __uptr
 #else
 #define GPTR *

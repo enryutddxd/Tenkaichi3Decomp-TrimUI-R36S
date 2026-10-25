@@ -97,7 +97,7 @@ extern int __real_main(int argc, char **argv);
 
 /* The fight's state, read the way port/src/headless.c reads it (integer interfaces only: this file is compiled
    for the Vita's float ABI, the game's is software float). */
-#ifdef PORT_TSP /* (64 bits: the game's own pointers are 4 bytes wide) */
+#ifdef PORT_A64 /* (64 bits: the game's own pointers are 4 bytes wide) */
 #define GPTR * __ptr32 __uptr
 #else
 #define GPTR *
@@ -1574,6 +1574,11 @@ int __wrap_main(int argc, char **argv) {
     setenv("BT3_SETTINGS", HOME "/bt3_settings.txt", 1);
 #ifndef PORT_VITA_RELEASE
     setenv("BT3_TRACE", "600", 1); /* the fight's state every 600 blanks into out.txt: comparable with a PC run */
+#endif
+#ifdef PORT_R36S
+    if (getenv("BT3_DISC") != NULL && getenv("BT3_DISC")[0] != '\0') { /* (the launcher's: another port's disc folder; bt3.txt disc= wins) */
+        snprintf(gVitaDisc, sizeof(gVitaDisc), "%s", getenv("BT3_DISC"));
+    }
 #endif
     read_settings();
     start_screen();

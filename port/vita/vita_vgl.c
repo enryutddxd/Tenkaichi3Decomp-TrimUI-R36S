@@ -1166,6 +1166,7 @@ static int sTexXf;             /* the primitive's texture is a picture drawn her
 static float sTexXfV[4];       /* s' = [0] + s * [1], t' = [2] + t * [3] */
 extern unsigned gVitaOl[4];
 static void rt_sync(void); /* (the render thread's work all done; see rt_start) */
+static int rt_tex_up(GLuint id, uint32_t w, uint32_t h, const uint32_t *px);
 static void rt_start(void);
 static int sRtOn;
 static void flush_vu(void) {
@@ -1367,7 +1368,7 @@ extern int gVitaAClear;
 int gVitaGpuAb = 0;         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
 int gVitaUbAb = 0;          /* (TrimUI test build) the uniform blocks' four ways in turn, 10 s each (r36s_gl.c gR36UbMode) */
 int gVitaOptAb = 0;         /* (TrimUI test build) the driver's ways of doing less (gR36Opt) off every other 10 s */
-#ifdef PORT_TSP /* (the TrimUI: the work targets' effects and the glow off by default: ~25 -> ~29.5 fps in a fight at 854 x 480, the
+#if defined(PORT_TSP) || defined(PORT_R36S64) /* (the TrimUI: the work targets' effects and the glow off by default: ~25 -> ~29.5 fps in a fight at 854 x 480, the
                     look hardly changed; bt3.txt fxwt=1, fxglow=1 to have them) */
 int gVitaFxMask = 4 | 2;
 #else
@@ -1646,7 +1647,7 @@ int GsGpu_Init(void) {
         /* (the TrimUI, test v11: on, 16-19 pictures a second as without it; the drawing thread 53% of its time
            waiting for the render thread (at the picture's end and for new textures), the render thread 75% busy in
            the driver: the driver's work is what limits it there. On unless bt3.txt rt=0) */
-#ifdef PORT_TSP
+#if defined(PORT_TSP) || defined(PORT_R36S64)
         if (e != NULL && atoi(e) == 0) {
 #else
         if (e == NULL || atoi(e) == 0) {
@@ -2139,7 +2140,7 @@ static GLuint texture_get_k(uint64_t t0raw, uint64_t texa) {
         ke->gi = gi;
         ke->tsig = tsig;
         if (bits <= 8) {
-#ifdef PORT_TSP
+#if defined(PORT_TSP) || defined(PORT_R36S64)
             /* (TrimUI) the palette by its colours, not by the ids of its blocks: the game paints palettes with sprites
                (an aura's, several times a picture), each paint new ids though the colours come back the same, and each
                made its 256 x 256 texture again (60 times in 2 s; the render thread's time on texture uploads) */
@@ -6933,7 +6934,7 @@ void GsGpu_FrameEnd(void) {
     sMainZ = 1;
     sSeeThru = 0;
     sTblZero = 0;
-#ifdef PORT_TSP
+#if defined(PORT_TSP) || defined(PORT_R36S64)
     {   /* (TrimUI test build: the effects all left out every other 10 s, on prof.txt's clock, for its A/B of the
            driver's time; bt3.txt fxab=0: as usual) */
         extern int gVitaFxAb;

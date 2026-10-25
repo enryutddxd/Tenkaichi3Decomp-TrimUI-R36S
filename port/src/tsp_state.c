@@ -6,7 +6,7 @@
  */
 #include <stdint.h>
 #include <stdio.h>
-#ifdef PORT_TSP /* (64 bits: the game's own pointers are 4 bytes wide) */
+#ifdef PORT_A64 /* (64 bits: the game's own pointers are 4 bytes wide) */
 #define GPTR * __ptr32 __uptr
 #else
 #define GPTR *

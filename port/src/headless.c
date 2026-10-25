@@ -233,7 +233,7 @@ void Port_Trace(unsigned vblanks) {
        triangle of the stage collision mesh, and say what the game's own sweep answers for the same segment. */
     if (getenv("BT3_CAMCHECK") != NULL && vblanks == (unsigned)atoi(getenv("BT3_CAMCHECK"))) {
         extern void *BtlChar_FindByObjId(int objId);
-#ifdef PORT_TSP
+#ifdef PORT_A64
         extern struct { int nodeCount, unk4, unk8, nodeOfs, polyOfs, vtxOfs; } * __ptr32 __uptr gStgColMesh;
 #else
         extern struct { int nodeCount, unk4, unk8, nodeOfs, polyOfs, vtxOfs; } *gStgColMesh;
