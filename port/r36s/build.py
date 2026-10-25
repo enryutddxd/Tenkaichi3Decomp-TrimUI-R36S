@@ -440,23 +440,23 @@ def package():
     P = ROOT / "port/trimui/package" if TSP else R / "package"
     sh = pkg / ("Roms/PORTS" if TSP else "ports") / ("Dragon Ball Z Budokai Tenkaichi 3 (64-bit).sh" if A64 and not TSP else "Dragon Ball Z Budokai Tenkaichi 3.sh")
     sh.parent.mkdir(parents=True, exist_ok=True)
-    REL = TSP and os.environ.get("BT3_RELEASE") == "1"  # (the release: the clean launcher, no measurements, no App folder)
-    shutil.copy(P / ("Tenkaichi3_release.sh" if REL else "Tenkaichi3_64.sh" if A64 and not TSP else "Tenkaichi3.sh"), sh)
+    REL = A64 and os.environ.get("BT3_RELEASE") == "1"  # (the release: the clean launcher, no measurements, no App folder)
+    shutil.copy(P / (("Tenkaichi3_release.sh" if TSP else "Tenkaichi3_64_release.sh") if REL else "Tenkaichi3_64.sh" if A64 and not TSP else "Tenkaichi3.sh"), sh)
     os.chmod(sh, 0o755)
-    shutil.copy(P / "README.txt", game / "README.txt")
+    shutil.copy(P / ("README_64.txt" if A64 and not TSP else "README.txt"), game / "README.txt")
     if TSP and not REL:  # (also as a TrimUI App: started without PortMaster)
         shutil.copytree(P / "app", pkg / "Apps/BT3")
         os.chmod(pkg / "Apps/BT3/launch.sh", 0o755)
     (game / "disc/PUT_YOUR_DISC_FILES_HERE.txt").write_text(
         "Copy SLUS_216.78 and the BIN and DATA folders of your own USA disc (SLUS-21678) here.\n"
         "Copia aqui SLUS_216.78 y las carpetas BIN y DATA de tu propio disco USA (SLUS-21678).\n")
-    if TSP:  # (the notices first, then the AGPL's text; the MIT notice and the third-party list beside it)
-        (game / "LICENSE.txt").write_text((P / "NOTICE.txt").read_text() + (ROOT / "LICENSE").read_text())
+    if A64:  # (the notices first, then the AGPL's text; the MIT notice and the third-party list beside it)
+        (game / "LICENSE.txt").write_text((ROOT / "port/trimui/package/NOTICE.txt").read_text() + (ROOT / "LICENSE").read_text())
         shutil.copy(ROOT / "LICENSE-MIT", game / "LICENSE-MIT.txt")
         shutil.copy(ROOT / "THIRD_PARTY.md", game / "THIRD_PARTY.txt")
     else:
         shutil.copy(ROOT / "LICENSE", game / "LICENSE.txt")
-    zipname = OUT / (("Tenkaichi3Decomp-TrimUI-release.zip" if REL else "Tenkaichi3Decomp-TrimUI.zip") if TSP else "Tenkaichi3Decomp-R36S-64.zip" if A64 else "Tenkaichi3Decomp-R36S.zip")
+    zipname = OUT / (("Tenkaichi3Decomp-TrimUI-release.zip" if REL else "Tenkaichi3Decomp-TrimUI.zip") if TSP else ("Tenkaichi3Decomp-R36S-64-release.zip" if REL else "Tenkaichi3Decomp-R36S-64.zip") if A64 else "Tenkaichi3Decomp-R36S.zip")
     if zipname.exists():
         zipname.unlink()
     subprocess.run(["zip", "-qr", str(zipname)] + ((["Roms", "Data"] if REL else ["Roms", "Data", "Apps"]) if TSP else ["ports"]), cwd=pkg, check=True)

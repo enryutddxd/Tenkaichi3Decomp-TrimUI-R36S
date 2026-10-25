@@ -454,7 +454,7 @@ int gVitaDpBatch = 1;
 int gVitaSwapLateAb = 0;
 extern int gVitaSilMode;
 #ifdef PORT_R36S64
-int gVitaSilAb = 1; /* (R36S 64-bit test 19: the shadows' silhouettes every 2nd / 3rd picture) */
+int gVitaSilAb = 0; /* (R36S 64-bit test 19: every third ~1 fps better hot, not seen) */
 #else
 int gVitaSilAb = 0;
 #endif /* (R36S 64-bit test 11: 10 ms late, 25-28 fps against 23-25) */
@@ -9418,7 +9418,11 @@ int GsGpu_DsLayer(int layer, int ctx, uint32_t count, const float *c, const void
    fighters in turn, and laid every picture where the fighter is now (only its pose a picture old). Never twice in a
    row with the one before, and not when the one before is older than a picture and a half (a fight's start, a
    slow stretch). */
+#ifdef PORT_R36S64
+int gVitaSilMode = 3; /* (the R36S: every third picture, test 19) */
+#else
 int gVitaSilMode = 2;
+#endif
 static unsigned long long sSilAt[WP_OTHER];
 static unsigned sSilTick, sSilOrder;
 int Port_ShadowSil(int slot) {
