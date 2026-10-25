@@ -2638,9 +2638,14 @@ static void state_restore(void) {
     bind_target();
 }
 unsigned gR36Frames;
+int gR36GpuFin = -1; /* (R36_GPUFIN=1) glFinish timed before each swap */
 void vglSwapBuffers(GLboolean has_commondialog) {
     ENTER();
     unsigned done = gxm_back_buffer_index % NDISP;
+    if (gR36GpuFin < 0) {
+        const char *e = getenv("R36_GPUFIN");
+        gR36GpuFin = e != NULL && atoi(e) > 0;
+    }
     (void)has_commondialog;
     flush_dirty();
     stream_next();
@@ -2659,12 +2664,18 @@ void vglSwapBuffers(GLboolean has_commondialog) {
     }
     {
         unsigned long long t0 = sceKernelGetProcessTimeWide(), t1;
-        static unsigned long long sumPresent, sumBetween, last;
+        static unsigned long long sumPresent, sumBetween, last, sumFin;
         static unsigned n, up0, up1;
         if (discard_on() && !gR36KeepDepth) { /* (the picture's depth and stencil: not stored, the next one clears them) */
             static const GLenum kDS[2] = {GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
             r_fbo(sDispFbo[done]);
             p_glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, kDS);
+        }
+        if (gR36GpuFin) { /* (a test: the GPU's own time after the last draw, apart from the wait for the screen) */
+            unsigned long long f0 = sceKernelGetProcessTimeWide();
+            p_glFinish();
+            sumFin += sceKernelGetProcessTimeWide() - f0;
+            t0 = sceKernelGetProcessTimeWide();
         }
         if (sPresentOn) {
             present_post((int)done, sDispTex[done], sDispW, sDispH, sAspect);
@@ -2678,6 +2689,10 @@ void vglSwapBuffers(GLboolean has_commondialog) {
         }
         last = t1;
         if (++n == 120) {
+            if (gR36GpuFin > 0) {
+                R36_LogLine("r36 gl: per picture (120): %u us the GPU finishing it after the last draw (glFinish)\n", (unsigned)(sumFin / n));
+                sumFin = 0;
+            }
             R36_LogLine("r36 gl: per picture (120): %u us putting it on the screen (the GPU finishing it), %u us drawing it; %u KB in %u pieces to the GPU from mapped buffers, %u draws\n",
                         (unsigned)(sumPresent / n), (unsigned)(sumBetween / n), (gR36Up[0] - up0) / n / 1024, (gR36Up[1] - up1) / n, (gR36Draws) / n);
             n = 0;
