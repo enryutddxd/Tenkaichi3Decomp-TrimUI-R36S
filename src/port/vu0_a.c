@@ -703,6 +703,151 @@ static void op_qmfc2(int t, int fs) {
     gRefVu0.gpr[t] = VF(fs);
 }
 
+/* (Taken from upstream Tenkaichi3Decomp's src/port/vu0_a.c, as carried by the tenkaichi-r36 port's source,
+   without its check against the original instructions. Without it the R36S / TrimUI builds stopped with
+   "not available on the Vita: ObjSeam_TransformVtx" at the first fighter with a seam section: Gohan and Videl
+   as the Great Saiyaman, Goku GT Super Saiyan 3.) */
+/* ================================================================================================================
+ * 0x10FFD0 ObjSeam_TransformVtx(vtx, work, mtx, ofs): skins, lights and projects one seam vertex of a model.
+ * Hand-written VU0 macro code of the game, translated here instruction for instruction (the comments give the
+ * address and the instruction). The screen matrix is in vf24..27 (set by the caller's surroundings); the routine
+ * leaves vf1..16 and vf19 changed, as on the PS2 (its caller runs Vu0_InitAxisRegs afterwards).
+ *   vtx:  +0x00 position (w = weight of the first of the two nodes), +0x10 normal, +0x20 uv;
+ *         written: +0x30 GS XYZ (12.4; w = 0xFFFF8000 when the point is outside), +0x50 uv * Q, +0x60 (shade, 0, 1) * Q
+ *   work: +0x80 light matrix, +0xC0 k (w = 0.5); written: +0x00 light * mtx[0], +0x40 light * mtx[1]
+ * ============================================================================================================== */
+static uint32_t ftoiBits(uint32_t a, int frac) {
+    uint32_t m = (a & 0x7FFFFF) | 0x800000, v;
+    int e = (int)((a >> 23) & 0xFF) - 127 + frac;
+
+    if (((a >> 23) & 0xFF) == 0 || e < 0) {
+        return 0;
+    }
+    if (e >= 31) {
+        return (a & SIGN) ? 0x80000000u : 0x7FFFFFFFu; /* saturates */
+    }
+    v = e >= 23 ? m << (e - 23) : m >> (23 - e);
+    return (a & SIGN) ? 0u - v : v;
+}
+
+static void op_vftoi(int m, int ft, int fs, int frac) {
+    uint32_t r[4];
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        r[i] = ftoiBits(VF(fs).u[i], frac);
+    }
+    put(ft, r, m);
+}
+
+static void op_vmfir(int m, int ft, int vi) {
+    uint32_t r[4];
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        r[i] = (uint32_t)(int32_t)(int16_t)gRefVu0.vi[vi];
+    }
+    put(ft, r, m);
+}
+
+static void seam_c(void *a0, void *a1, const void *a2, const void *a3) {
+    static const uint32_t k4096[4] = {0x45800000u, 0x45800000u, 0, 0}; /* z, w: the upper half of $v0, not known */
+    int i, out;
+
+    put(19, k4096, M_XYZW);                    /* 10FFD0..E0  $v0 = 4096.0f twice; qmtc2 $v0, vf19 */
+    gRefVu0.vi[1] = 0x8000;                    /* 10FFE4..E8  ctc2 0x8000, vi1 */
+    for (i = 0; i < 8; i++) {
+        op_lqc2(1 + i, AT(a2, i * 16));        /* 10FFF0..0C  lqc2 vf1..vf8, 0x00..0x70(a2) */
+    }
+    for (i = 0; i < 4; i++) {
+        op_lqc2(9 + i, AT(a1, 0x80 + i * 16)); /* 110010..1C  lqc2 vf9..vf12, 0x80..0xB0(a1) */
+    }
+    for (i = 0; i < 3; i++) {                  /* 110020..4C  vf13 + i = light * vf(1 + i) */
+        op_vmulabc(M_XYZW, 9, 1 + i, X);
+        op_vmaddabc(M_XYZW, 10, 1 + i, Y);
+        op_vmaddabc(M_XYZW, 11, 1 + i, Z);
+        op_vmaddbc(M_XYZW, 13 + i, 12, 1 + i, W);
+    }
+    op_sqc2(13, AT(a1, 0x00));                 /* 110050..5C */
+    op_sqc2(14, AT(a1, 0x10));
+    op_sqc2(15, AT(a1, 0x20));
+    op_sqc2(12, AT(a1, 0x30));
+    for (i = 0; i < 3; i++) {                  /* 110060..8C  the same with vf5..vf7 */
+        op_vmulabc(M_XYZW, 9, 5 + i, X);
+        op_vmaddabc(M_XYZW, 10, 5 + i, Y);
+        op_vmaddabc(M_XYZW, 11, 5 + i, Z);
+        op_vmaddbc(M_XYZW, 13 + i, 12, 5 + i, W);
+    }
+    op_sqc2(13, AT(a1, 0x40));                 /* 110090..9C */
+    op_sqc2(14, AT(a1, 0x50));
+    op_sqc2(15, AT(a1, 0x60));
+    op_sqc2(12, AT(a1, 0x70));
+    op_lqc2(13, AT(a0, 0x10));                 /* 1100A0  normal */
+    op_lqc2(16, AT(a0, 0x00));                 /* 1100A4  position */
+    for (i = 0; i < 4; i++) {
+        op_lqc2(9 + i, AT(a1, i * 16));        /* 1100A8..B4 */
+    }
+    op_vmulabc(M_XYZW, 9, 13, X);              /* 1100B8 */
+    op_vmaddabc(M_XYZW, 10, 13, Y);
+    op_vmaddabc(M_XYZW, 11, 13, Z);
+    op_vmaddbc(M_XYZW, 14, 12, 0, W);          /* 1100C4  vmaddw vf14, vf12, vf0w */
+    for (i = 0; i < 4; i++) {
+        op_lqc2(9 + i, AT(a1, 0x40 + i * 16)); /* 1100C8..D4 */
+    }
+    op_vmulabc(M_XYZW, 9, 13, X);              /* 1100D8 */
+    op_vmaddabc(M_XYZW, 10, 13, Y);
+    op_vmaddabc(M_XYZW, 11, 13, Z);
+    op_vmaddbc(M_XYZW, 15, 12, 0, W);          /* 1100E4 */
+    op_vsub(M_XYZW, 14, 14, 15);               /* 1100E8 */
+    op_vmulbc(M_XYZW, 14, 14, 16, W);          /* 1100EC  vmulw vf14, vf14, vf16w */
+    op_vadd(M_XYZ, 14, 15, 14);                /* 1100F0 */
+    op_lqc2(13, AT(a1, 0xC0));                 /* 1100F4 */
+    op_vmulbc(M_XYZ, 14, 14, 13, W);           /* 1100F8 */
+    op_vaddbc(M_XYZ, 14, 14, 13, W);           /* 1100FC */
+    op_vadd(M_X, 15, 0, 14);                   /* 110100 */
+    op_vadd(M_Y, 15, 0, 0);                    /* 110104 */
+    op_vaddbc(M_Z, 15, 0, 0, W);               /* 110108 */
+    op_lqc2(9, AT(a3, 0x00));                  /* 11010C */
+    op_lqc2(10, AT(a3, 0x10));
+    op_vsub(M_XYZW, 11, 16, 9);                /* 110114 */
+    op_vsub(M_XYZW, 12, 16, 10);
+    op_vmulabc(M_XYZW, 1, 11, X);              /* 11011C */
+    op_vmaddabc(M_XYZW, 2, 11, Y);
+    op_vmaddabc(M_XYZW, 3, 11, Z);
+    op_vmaddbc(M_XYZW, 13, 4, 0, W);
+    op_vmulabc(M_XYZW, 5, 12, X);              /* 11012C */
+    op_vmaddabc(M_XYZW, 6, 12, Y);
+    op_vmaddabc(M_XYZW, 7, 12, Z);
+    op_vmaddbc(M_XYZW, 14, 8, 0, W);
+    op_vsub(M_XYZW, 9, 13, 14);                /* 11013C */
+    op_vmulbc(M_XYZW, 9, 9, 16, W);
+    op_vadd(M_XYZW, 9, 14, 9);
+    op_vmulabc(M_XYZW, 24, 9, X);              /* 110148  the screen matrix */
+    op_vmaddabc(M_XYZW, 25, 9, Y);
+    op_vmaddabc(M_XYZW, 26, 9, Z);
+    op_vmaddbc(M_XYZW, 9, 27, 9, W);
+    op_vdiv(0, W, 9, W);                       /* 110158  Q = 1 / w */
+    op_vmulq(M_XYZ, 9, 9);                     /* 110160 */
+    op_vftoi(M_XYZW, 10, 9, 4);                /* 110164  vftoi4 */
+    gRefVu0.status = 0;                        /* 110170  ctc2 $zero, vi16 */
+    op_vsub(M_XYW, 0, 9, 0);                   /* 110174  flags only: x, y, w - 1 */
+    op_vsub(M_XY, 0, 19, 9);                   /* 110178  flags only: 4096 - x, 4096 - y */
+    out = (gRefVu0.status & 0xC0) != 0;        /* 11018C..A4  sticky zero or sign: outside */
+    if (out) {
+        op_vmfir(M_W, 10, 1);                  /* 1101B0  vmfir.w vf10, vi1 */
+    }
+    op_lqc2(11, AT(a0, 0x20));                 /* 1101B4  uv */
+    op_vmulq(M_XYZ, 12, 11);                   /* 1101B8 */
+    op_vmulq(M_XYZ, 14, 15);                   /* 1101BC */
+    op_sqc2(12, AT(a0, 0x50));                 /* 1101C0 */
+    op_sqc2(14, AT(a0, 0x60));
+    op_sqc2(10, AT(a0, 0x30));                 /* 1101CC */
+}
+
+void Ref_ObjSeam_TransformVtx(void *vtx, void *work, const void *mtx, const void *ofs) {
+    seam_c(vtx, work, mtx, ofs);
+}
+
 void Ref_Vu0_ResetState(void) {
     memset(&gRefVu0, 0, sizeof(gRefVu0));
     gRefVu0.vf[0].u[W] = 0x3F800000u;
