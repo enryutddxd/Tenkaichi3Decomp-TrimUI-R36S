@@ -1392,7 +1392,7 @@ int gVitaGpuAb = 1; /* (R36S 64-bit test 3: the effects A/B on by default) */
 int gVitaGpuAb = 0; //         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
 #endif
 #ifdef PORT_R36S64
-int gVitaUbAb = 1; /* (R36S 64-bit test 16: the four ways of the uniform blocks in turn) */
+int gVitaUbAb = 0; /* (R36S 64-bit test 16: mode 1 best there) */
 #else
 int gVitaUbAb = 0;          /* (TrimUI test build) the uniform blocks' four ways in turn, 10 s each (r36s_gl.c gR36UbMode) */
 #endif

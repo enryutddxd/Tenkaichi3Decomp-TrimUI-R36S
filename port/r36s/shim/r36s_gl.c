@@ -1802,7 +1802,11 @@ static long stream_put(const void *data, size_t n, unsigned align) {
    1 the stream (persistent, coherent, also vertices and indices), 2 a buffer a part of its own written with
    glBufferSubData, 3 a persistent coherent buffer of its own, 4 one small buffer per block given the copy with
    glBufferData each time. */
+#ifdef PORT_R36S64
+int gR36UbMode = 1; /* (the R36S's Mali: in the stream, test 16: ~1.5 fps better than the ring of mode 3; mode 2 ~1 fps in all) */
+#else
 int gR36UbMode = 3;
+#endif
 static struct { GLuint buf; long off; uint32_t size; } sUbBound[2] = {{0, -1, 0}, {0, -1, 0}};
 static GLuint sUbFb[2];
 static unsigned sUbAlign;
