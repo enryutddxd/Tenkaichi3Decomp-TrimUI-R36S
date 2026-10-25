@@ -60,6 +60,8 @@ void R36_GameState(FILE *f) {
         extern unsigned gVitaPsw[4], gVitaStBkN;
         extern int gVitaStBk, gVitaStBkAb;
         static unsigned pw[4], pn;
+        extern int gVitaSilMode, gVitaSilAb;
+        fprintf(f, "  shadows' silhouettes: every %s picture%s\n", gVitaSilMode == 3 ? "third" : gVitaSilMode == 2 ? "other" : "", gVitaSilAb ? " (A/B, 10 s each)" : "");
         extern int gVitaSwapLateAb, gR36SwapLate;
         extern unsigned gR36SwapLateN[3];
         static unsigned psl[3];

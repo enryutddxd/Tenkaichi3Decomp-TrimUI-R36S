@@ -451,7 +451,13 @@ unsigned gVitaPsw[4];
 int gVitaStBk = 1, gVitaStBkAb = 0;
 /* the model parts several to a draw (the batched programs: a loop over 32 slots per vertex); bt3.txt dpbatch, dpbatchab */
 int gVitaDpBatch = 1;
-int gVitaSwapLateAb = 0; /* (R36S 64-bit test 11: 10 ms late, 25-28 fps against 23-25) */
+int gVitaSwapLateAb = 0;
+extern int gVitaSilMode;
+#ifdef PORT_R36S64
+int gVitaSilAb = 1; /* (R36S 64-bit test 19: the shadows' silhouettes every 2nd / 3rd picture) */
+#else
+int gVitaSilAb = 0;
+#endif /* (R36S 64-bit test 11: 10 ms late, 25-28 fps against 23-25) */
 #ifdef PORT_R36S64
 int gVitaAClearAb = 0; /* (R36S 64-bit test 12: clears ~1 fps better there) */
 #else
@@ -6988,6 +6994,10 @@ void GsGpu_FrameEnd(void) {
             extern int gR36UbMode;
             gR36UbMode = 1 + (int)(gR36ProfWindow % 4u);
         }
+        if (gVitaSilAb) { /* in turn: the silhouettes every other picture; every third */
+            extern volatile unsigned gR36ProfWindow;
+            gVitaSilMode = (gR36ProfWindow & 1) == 0 ? 2 : 3;
+        }
         if (gVitaSwapLateAb) { /* in turn: the swap 10 ms into the next picture; at once */
             extern volatile unsigned gR36ProfWindow;
             extern int gR36SwapLate;
@@ -9420,6 +9430,9 @@ int Port_ShadowSil(int slot) {
     if (gVitaSilMode == 2 && sSilAt[slot] != 0 && now - sSilAt[slot] < 50000ull && ((sSilTick + n) & 1)) {
         sSilAt[slot] = 0; /* (the next is drawn whatever comes) */
         return 0;
+    }
+    if (gVitaSilMode == 3 && sSilAt[slot] != 0 && now - sSilAt[slot] < 85000ull && (sSilTick + n) % 3u != 0) {
+        return 0; /* (mode 3: each drawn every third picture, the fighters in turn; laid with the one before meanwhile) */
     }
     sSilAt[slot] = now;
     return 1;
