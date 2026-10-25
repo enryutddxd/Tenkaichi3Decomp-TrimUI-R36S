@@ -39,9 +39,9 @@ fi
 export LD_LIBRARY_PATH="$GAMEDIR/libs:$LD_LIBRARY_PATH"
 echo "disc folder: ${BT3_DISC:-$GAMEDIR/disc}"; uname -m
 unset SDL_BLITTER_DISABLED
-# (the pictures put on the screen by the render thread itself: with the present thread's own context the R36S's
-# Mali showed nothing, test 1. bt3.txt present=1 to try it again)
-grep -q '^present=1' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_PRESENT=1 || export R36_PRESENT=0
+# (the pictures put on the screen by a thread of their own, through SDL's swap (KMSDRM's page flip; test 1 swapped
+# through EGL alone and showed nothing). bt3.txt present=0: by the render thread itself)
+grep -q '^present=0' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_PRESENT=0 || export R36_PRESENT=1
 # (bt3.txt vsync=0: the swap not held to the screen's refresh; read here, the program reads bt3.txt after the window is made)
 grep -q '^vsync=0' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_VSYNC=0
 

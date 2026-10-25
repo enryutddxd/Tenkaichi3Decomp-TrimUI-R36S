@@ -2370,6 +2370,7 @@ static struct { int buf; GLuint tex; int w, h; float aspect; GLsync ready; } sPr
 static int sPrQ[NDISP + 1], sPrQn; /* the order of the queued */
 static volatile int sPrBusy;
 unsigned gR36Present[3]; /* (for the log) shown, dropped (a newer one came first), render thread waits for a showing */
+static int sPrSdlSwap; /* (present_init) the window's driver is KMSDRM (the R36S's ArkOS) */
 static void *present_thread(void *arg) {
     static const float kQuad[8] = {-1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f};
     GLuint prog;
@@ -2439,7 +2440,11 @@ static void *present_thread(void *arg) {
             pthread_cond_broadcast(&sPrCond);
             pthread_mutex_unlock(&sPrLock);
         }
-        sE.SwapBuffers(sE.dpy, sE.surf);
+        if (sPrSdlSwap) { /* (KMSDRM: SDL's swap also puts the buffer on the screen, a page flip; EGL's alone shows nothing) */
+            SDL_GL_SwapWindow(sWin);
+        } else {
+            sE.SwapBuffers(sE.dpy, sE.surf);
+        }
         gR36Present[0]++;
     }
     return NULL;
@@ -2498,6 +2503,11 @@ static void present_init(void) {
         R36_LogLine("r36 gl: no present thread (the context not current without the window)\n");
         sE.MakeCurrent(sE.dpy, sE.surf, sE.surf, sE.ctx);
         return;
+    }
+    {
+        const char *drv = SDL_GetCurrentVideoDriver();
+        sPrSdlSwap = drv != NULL && SDL_strcasecmp(drv, "KMSDRM") == 0;
+        R36_LogLine("r36 gl: video driver %s: the present thread swaps through %s\n", drv != NULL ? drv : "?", sPrSdlSwap ? "SDL" : "EGL");
     }
     sPresentOn = 1;
     r_forget();
