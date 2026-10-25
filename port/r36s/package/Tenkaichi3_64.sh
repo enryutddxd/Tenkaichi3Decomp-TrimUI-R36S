@@ -48,6 +48,9 @@ grep -q '^vsync=0' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_VSYNC=0
 grep -q '^fragmp=1' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_FRAG_MP=1 || export R36_FRAG_MP=0
 # (bt3.txt gpufin=1: the GPU's own time per picture measured, glFinish before the swap; test 10: ~13 ms after the last draw)
 grep -q '^gpufin=1' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_GPUFIN=1 || export R36_GPUFIN=0
+# (test 18: the shaders' uniforms as plain uniforms, not in blocks: on the Mali the draws' time went to binding the
+# blocks; bt3.txt ubo=1: in blocks, as on the TrimUI)
+grep -q '^ubo=1' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_UBO=1 || export R36_UBO=0
 
 # the processor and the graphics chip at their full speed while the game runs (put back as they were afterwards)
 GOVS=$(ls /sys/devices/system/cpu/cpufreq/policy*/scaling_governor /sys/class/devfreq/*/governor 2>/dev/null)
