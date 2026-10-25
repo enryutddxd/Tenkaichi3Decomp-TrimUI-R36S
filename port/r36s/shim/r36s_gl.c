@@ -1987,7 +1987,11 @@ static void draw_done(unsigned long long t0) {
    the GPU to end the picture, ~13 ms after its last draw on the Mali, during which nothing was drawn. The picture is
    drawn onto the window at once; the swap itself when the next picture's first draws are with the GPU (pre_draw) or
    at the next picture's end at the latest. gR36SwapLate: ms after the picture's end, 0 off. */
+#ifdef PORT_R36S64
+int gR36SwapLate = 10; /* (R36S 64-bit test 11: 25-28 fps in fights against 23-25) */
+#else
 int gR36SwapLate;
+#endif
 static int sSwapPending;
 static unsigned long long sSwapAt;
 unsigned gR36SwapLateN[2]; /* (for the log) swaps made late in the next picture, at its end */

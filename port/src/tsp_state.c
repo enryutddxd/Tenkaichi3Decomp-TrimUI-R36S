@@ -44,6 +44,8 @@ void R36_GameState(FILE *f) {
     }
     {
         extern unsigned gVitaAClr[3];
+        extern int gVitaAClear, gVitaAClearAb;
+        fprintf(f, "  alpha clears as: %s%s\n", gVitaAClear == 2 ? "one rectangle drawn" : gVitaAClear == 1 ? "clears" : "off", gVitaAClearAb ? " (A/B, 10 s each)" : "");
         static unsigned pa[3];
         fprintf(f, "  alpha clears: %u batches (%u sprites) cleared, %u looked at and drawn\n", gVitaAClr[0] - pa[0], gVitaAClr[1] - pa[1], gVitaAClr[2] - pa[2]);
         memcpy(pa, gVitaAClr, sizeof(pa));
