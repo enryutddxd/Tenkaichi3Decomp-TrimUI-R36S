@@ -42,13 +42,16 @@ export R36_PROF=0   # (no prof.txt: the test builds' measurements off)
 unset SDL_BLITTER_DISABLED
 # (the pictures put on the screen by the render thread itself: with a thread of their own the screen stayed black,
 # through EGL (test 1) and through SDL (test 7). bt3.txt present=1 to try it)
-grep -q '^present=1' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_PRESENT=1 || export R36_PRESENT=0
+# (test 21: made current through SDL on its thread, as the other R36S port of the game does: on; bt3.txt present=0 off)
+grep -q '^present=0' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_PRESENT=0 || export R36_PRESENT=1
 # (bt3.txt vsync=0: the swap not held to the screen's refresh; read here, the program reads bt3.txt after the window is made)
 grep -q '^vsync=0' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_VSYNC=0
 # (bt3.txt fragmp=1: the pixel shaders in medium precision; test 9: no faster)
 grep -q '^fragmp=1' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_FRAG_MP=1 || export R36_FRAG_MP=0
 # (bt3.txt gpufin=1: the GPU's own time per picture measured, glFinish before the swap; test 10: ~13 ms after the last draw)
 grep -q '^gpufin=1' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_GPUFIN=1 || export R36_GPUFIN=0
+# (bt3.txt ubgrid=4096: the uniform blocks in the stream on a grid (test 25-26; did not stop the heap growing), off by default)
+UBGRID=$(sed -n 's/^ubgrid=\([0-9]*\).*/\1/p' "$GAMEDIR/bt3.txt" 2>/dev/null | tail -1); export R36_UBGRID=${UBGRID:-0}
 # (bt3.txt ubo=0: the shaders' uniforms as plain uniforms, not in blocks; test 18: slower, 22-28 fps against 28-30)
 grep -q '^ubo=0' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_UBO=0 || export R36_UBO=1
 
@@ -60,6 +63,30 @@ for g in $GOVS; do
   $ESUDO sh -c "echo performance > $g" 2>/dev/null
   echo "governor $g: ${OLDGOV[$g]} -> $(cat "$g" 2>/dev/null)"
 done
+# Less heat (test 24): the processor and the graphics chip held at a lower top speed, at a lower voltage. A fight
+# brings them there anyway after a few minutes (test 22: 1008 / 400 MHz from minute 12, 22-28 fps, the chip still
+# climbing to 88 C); held lower from the start, the chip runs cooler and the speed steadier. Only the top is
+# lowered: the system's own heat limits stay as they are. bt3.txt cpumax=<MHz> (1008, 1200, 1248, 1296, 1512),
+# gpumax=<MHz> (400, 480, 520); 0 = no cap.
+CPUMAX=$(sed -n 's/^cpumax=\([0-9]*\).*/\1/p' "$GAMEDIR/bt3.txt" 2>/dev/null | tail -1); CPUMAX=${CPUMAX:-1200}
+GPUMAX=$(sed -n 's/^gpumax=\([0-9]*\).*/\1/p' "$GAMEDIR/bt3.txt" 2>/dev/null | tail -1); GPUMAX=${GPUMAX:-400}
+declare -A OLDMAX
+if [ "$CPUMAX" -gt 0 ]; then
+  for f in /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq; do
+    [ -f "$f" ] || continue
+    OLDMAX[$f]=$(cat "$f")
+    $ESUDO sh -c "echo $((CPUMAX * 1000)) > $f" 2>/dev/null
+    echo "processor top: ${OLDMAX[$f]} -> $(cat "$f") kHz"
+  done
+fi
+if [ "$GPUMAX" -gt 0 ]; then
+  for d in /sys/class/devfreq/*gpu*; do
+    [ -f "$d/max_freq" ] || continue
+    OLDMAX[$d/max_freq]=$(cat "$d/max_freq")
+    $ESUDO sh -c "echo $((GPUMAX * 1000000)) > $d/max_freq" 2>/dev/null
+    echo "graphics chip top: ${OLDMAX[$d/max_freq]} -> $(cat "$d/max_freq") Hz"
+  done
+fi
 cat /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq /sys/devices/system/cpu/cpufreq/policy*/scaling_cur_freq /sys/class/devfreq/*/cur_freq 2>/dev/null | tr '\n' ' '; echo "(processor max, now; devfreq now)"
 
 chmod +x "$GAMEDIR/bt3"
@@ -77,6 +104,9 @@ if [ $STATUS -ge 128 ]; then
 fi
 
 $ESUDO kill -9 $(pidof gptokeyb) 2>/dev/null
+for f in "${!OLDMAX[@]}"; do
+  $ESUDO sh -c "echo ${OLDMAX[$f]} > $f" 2>/dev/null
+done
 for g in $GOVS; do
   [ -n "${OLDGOV[$g]}" ] && $ESUDO sh -c "echo ${OLDGOV[$g]} > $g" 2>/dev/null
 done
