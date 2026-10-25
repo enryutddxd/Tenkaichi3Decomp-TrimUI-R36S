@@ -449,7 +449,7 @@ int gVitaStBk = 1, gVitaStBkAb = 0;
 /* the model parts several to a draw (the batched programs: a loop over 32 slots per vertex); bt3.txt dpbatch, dpbatchab */
 int gVitaDpBatch = 1;
 #ifdef PORT_R36S64
-int gVitaDpBatchAb = 1; /* (R36S 64-bit test 4) */
+int gVitaDpBatchAb = 0; /* (R36S 64-bit test 4: on is faster there too, 24 against 19 fps) */
 #else
 int gVitaDpBatchAb = 0;
 #endif /* the stage's GS-way strips with the batched program (bt3.txt stbk, stbkab: in turn) */
