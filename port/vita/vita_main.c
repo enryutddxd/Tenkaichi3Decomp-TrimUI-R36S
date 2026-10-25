@@ -1253,6 +1253,13 @@ static void read_settings(void) {
             extern int gVitaStBk, gVitaStBkAb;
             gVitaStBk = atoi(eq);
             gVitaStBkAb = 0;
+        } else if (strcmp(line, "dpbatch") == 0) { /* 0: the model parts drawn one by one */
+            extern int gVitaDpBatch, gVitaDpBatchAb;
+            gVitaDpBatch = atoi(eq);
+            gVitaDpBatchAb = 0;
+        } else if (strcmp(line, "dpbatchab") == 0) {
+            extern int gVitaDpBatchAb;
+            gVitaDpBatchAb = atoi(eq);
         } else if (strcmp(line, "fxrot") == 0) { /* (TrimUI) 0: one set of ids/fog targets */
             extern int gVitaFxRot, gVitaFxRotAb;
             gVitaFxRot = atoi(eq);

@@ -58,6 +58,8 @@ void R36_GameState(FILE *f) {
         extern unsigned gVitaPsw[4], gVitaStBkN;
         extern int gVitaStBk, gVitaStBkAb;
         static unsigned pw[4], pn;
+        extern int gVitaDpBatch, gVitaDpBatchAb;
+        fprintf(f, "  model parts several to a draw: %s%s\n", gVitaDpBatch ? "on" : "off", gVitaDpBatchAb ? " (A/B, 10 s each)" : "");
         extern int gVitaFxRot, gVitaFxRotAb;
         fprintf(f, "  ids/fog targets in three sets: %s%s\n", gVitaFxRot ? "on" : "off", gVitaFxRotAb ? " (A/B, 10 s each)" : "");
         extern int gR36UbLim, gVitaFxPrev, gVitaFxPrevAb;

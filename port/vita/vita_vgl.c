@@ -445,7 +445,14 @@ typedef struct Variant { GLuint prog; GLint test, tex, u[6]; int bk; /* (R36S: a
 /* (for the log) the program changes: all; between kinds (the GS's, the parts') with the same pixel shader flags; with
    the flags differing only by 16/64/1024 (the GS's own vertex shader variants); within one kind */
 unsigned gVitaPsw[4];
-int gVitaStBk = 1, gVitaStBkAb = 0; /* the stage's GS-way strips with the batched program (bt3.txt stbk, stbkab: in turn) */
+int gVitaStBk = 1, gVitaStBkAb = 0;
+/* the model parts several to a draw (the batched programs: a loop over 32 slots per vertex); bt3.txt dpbatch, dpbatchab */
+int gVitaDpBatch = 1;
+#ifdef PORT_R36S64
+int gVitaDpBatchAb = 1; /* (R36S 64-bit test 4) */
+#else
+int gVitaDpBatchAb = 0;
+#endif /* the stage's GS-way strips with the batched program (bt3.txt stbk, stbkab: in turn) */
 unsigned gVitaStBkN;
 static int sPswKind = -1, sPswFlags = -1;
 unsigned gVitaPswPair[64][2]; /* (for the log) the commonest changes: (from kind << 12 | flags) << 16 | (to ...), count */
@@ -1365,7 +1372,7 @@ int gVitaFxSweep;           /* the effects left out in turn, 60 pictures each, t
 int gVitaFxAb = 0;          /* (TrimUI test build) see frame_begin */
 int gVitaGlowHalf = 1;      /* (see glow_exec) */
 extern int gVitaAClear;
-#ifdef PORT_R36S64
+#if 0
 int gVitaGpuAb = 1; /* (R36S 64-bit test 3: the effects A/B on by default) */
 #else
 int gVitaGpuAb = 0; //         /* (TrimUI test build) in turn, 10 s each: as set; the fights at 640 x 368; the effects left out */
@@ -3230,7 +3237,7 @@ static void flush_impl(const FlushIn *in) {
         /* the stage's strips drawn the GS's way (not planned) with the batched direct path's stage program: the
            same transform (kVertStage = kVertStD), one slot taking every vertex. The two had alternated, a
            program change each (v47: about half of them in the heavy stretches) */
-        if (in->kind == 1 && gVitaStBk && !(gVglSafe & 32768) && sVsKind[6] != 0 && sDpUSize[1] == 6u * 16u) {
+        if (in->kind == 1 && gVitaStBk && gVitaDpBatch && !(gVglSafe & 32768) && sVsKind[6] != 0 && sDpUSize[1] == 6u * 16u) {
             var = variant(6, vf);
         }
         if (var == NULL)
@@ -6958,6 +6965,10 @@ void GsGpu_FrameEnd(void) {
             extern int gR36UbMode;
             gR36UbMode = 1 + (int)(gR36ProfWindow % 4u);
         }
+        if (gVitaDpBatchAb) { /* in turn: the parts batched; one by one */
+            extern volatile unsigned gR36ProfWindow;
+            gVitaDpBatch = (gR36ProfWindow & 1) == 0;
+        }
         if (gVitaFxRotAb) { /* in turn: the ids/fog targets in three sets; one set */
             extern volatile unsigned gR36ProfWindow;
             gVitaFxRot = (gR36ProfWindow & 1) == 0;
@@ -9669,7 +9680,7 @@ static void dp_draw_items(DpItem *items, int n, int prof) {
             int vflags = fm | tst << 2 | (sNoProj && fm ? 8 : 0) | (raw ? 512 : gVglLean ? 32 : 0);
             const Variant *var = NULL;
 #ifdef PORT_R36S
-            if (sVsKind[kind + 2] != 0 && sDpUSize[mode == 1 ? 0 : 1] == (mode == 1 ? 23u : 6u) * 16u) {
+            if (gVitaDpBatch && sVsKind[kind + 2] != 0 && sDpUSize[mode == 1 ? 0 : 1] == (mode == 1 ? 23u : 6u) * 16u) {
                 var = variant(kind + 2, vflags);
             }
             if (var == NULL)
