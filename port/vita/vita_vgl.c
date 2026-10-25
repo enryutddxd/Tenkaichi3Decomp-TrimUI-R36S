@@ -452,6 +452,11 @@ int gVitaStBk = 1, gVitaStBkAb = 0;
 /* the model parts several to a draw (the batched programs: a loop over 32 slots per vertex); bt3.txt dpbatch, dpbatchab */
 int gVitaDpBatch = 1;
 #ifdef PORT_R36S64
+int gVitaSplitAb = 1; /* (R36S 64-bit test 8: the parts' flushes A/B) */
+#else
+int gVitaSplitAb = 0;
+#endif
+#ifdef PORT_R36S64
 int gVitaDpBatchAb = 0; /* (R36S 64-bit test 4: on is faster there too, 24 against 19 fps) */
 #else
 int gVitaDpBatchAb = 0;
@@ -6967,6 +6972,11 @@ void GsGpu_FrameEnd(void) {
             extern volatile unsigned gR36ProfWindow;
             extern int gR36UbMode;
             gR36UbMode = 1 + (int)(gR36ProfWindow % 4u);
+        }
+        if (gVitaSplitAb) { /* in turn: the picture handed to the GPU in parts; whole */
+            extern volatile unsigned gR36ProfWindow;
+            extern int gR36Split;
+            gR36Split = (gR36ProfWindow & 1) == 0;
         }
         if (gVitaDpBatchAb) { /* in turn: the parts batched; one by one */
             extern volatile unsigned gR36ProfWindow;

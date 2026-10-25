@@ -58,6 +58,8 @@ void R36_GameState(FILE *f) {
         extern unsigned gVitaPsw[4], gVitaStBkN;
         extern int gVitaStBk, gVitaStBkAb;
         static unsigned pw[4], pn;
+        extern int gVitaSplitAb, gR36Split;
+        fprintf(f, "  picture handed to the GPU in parts: %s%s\n", gR36Split ? "on" : "off", gVitaSplitAb ? " (A/B, 10 s each)" : "");
         extern int gVitaDpBatch, gVitaDpBatchAb;
         fprintf(f, "  model parts several to a draw: %s%s\n", gVitaDpBatch ? "on" : "off", gVitaDpBatchAb ? " (A/B, 10 s each)" : "");
         extern int gVitaFxRot, gVitaFxRotAb;
