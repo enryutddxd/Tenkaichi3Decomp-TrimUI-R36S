@@ -453,7 +453,7 @@ int gVitaStBk = 1, gVitaStBkAb = 0;
 int gVitaDpBatch = 1;
 int gVitaSwapLateAb = 0; /* (R36S 64-bit test 11: 10 ms late, 25-28 fps against 23-25) */
 #ifdef PORT_R36S64
-int gVitaAClearAb = 1; /* (R36S 64-bit test 12) */
+int gVitaAClearAb = 0; /* (R36S 64-bit test 12: clears ~1 fps better there) */
 #else
 int gVitaAClearAb = 0;
 #endif
@@ -3064,7 +3064,11 @@ static void apply_fixed(const State *s) {
    written, or blended with the source's alpha 0) and cover their rectangle whole: the picture's alpha cleared there
    (and the depth, with ZTST ALWAYS and its write, when all of it is one depth; and the stencil's copy of alpha bit 7)
    by a clear instead of two to eight screens drawn pixel by pixel a picture. bt3.txt aclear=0: drawn as before. */
+#ifdef PORT_R36S64
+int gVitaAClear = 1; /* (the R36S's Mali: as clears, test 12: ~27.8 fps against ~26.8 drawn) */
+#else
 int gVitaAClear = 2; /* (2: one rectangle drawn; with the render thread the limit, cheaper than a partial clear: ~70 us each) */
+#endif
 unsigned gVitaAClr[3]; /* (for the log) batches cleared, their sprites, batches looked at and drawn after all */
 static FlushIn sAcIn;
 static V sAcQ[6];
