@@ -7161,14 +7161,17 @@ void GsGpu_FrameEnd(void) {
         }
         {   /* (and the picture after one of more than 45 blended screens, twice a fight: what the busiest are made of) */
             static float covPrev;
-            static unsigned heavy;
+            static unsigned heavy, brkPrev, heavyB;
+            unsigned brk = gVitaBrk[14] - brkPrev; /* (test 30: a picture of more than 1500 GS batches, three times a fight: the planet's explosion) */
+            brkPrev = gVitaBrk[14];
             float fc = gVglCov[1] >= covPrev ? gVglCov[1] - covPrev : gVglCov[1];
             covPrev = gVglCov[1];
             if (!Vita_InFight()) {
                 heavy = 0;
+                heavyB = 0;
             }
             extern int Vita_InBattle(void);
-            if ((Vita_InFight() && (++n % 150 == 40 || (fc > 45.0f * 512.0f * 448.0f && heavy < 2 && !sCovSample && ++heavy))) ||
+            if ((Vita_InFight() && (++n % 150 == 40 || (brk > 1500 && heavyB < 3 && !sCovSample && ++heavyB) || (fc > 45.0f * 512.0f * 448.0f && heavy < 2 && !sCovSample && ++heavy))) ||
                 (gVitaFilm > 0 && !Vita_InFight() && Vita_InBattle() && ++n % 45 == 20)) { /* (the intros too, every 45 pictures, in a test run with the film) */
                 sCovSample = 1;
                 sCovN = 0;
