@@ -703,7 +703,7 @@ static void op_qmfc2(int t, int fs) {
     gRefVu0.gpr[t] = VF(fs);
 }
 
-/* (Taken from upstream Tenkaichi3Decomp's src/port/vu0_a.c, as carried by the tenkaichi-r36 port's source,
+/* (Taken from upstream Tenkaichi3Decomp's src/port/vu0_a.c,
    without its check against the original instructions. Without it the R36S / TrimUI builds stopped with
    "not available on the Vita: ObjSeam_TransformVtx" at the first fighter with a seam section: Gohan and Videl
    as the Great Saiyaman, Goku GT Super Saiyan 3.) */

@@ -2532,7 +2532,7 @@ static void *present_thread(void *arg) {
     /* KMSDRM: through SDL, so that SDL knows the window is current on this thread. SDL_GL_SwapWindow (the page flip)
        does nothing on a thread where SDL has not seen the window made current ("The specified window has not been
        made current"): the black screen of tests 1 and 7, with eglMakeCurrent alone. (SDL's GL context on EGL is the
-       EGLContext itself.) The way the other R36S port of this game (tenkaichi-r36) shows its pictures. */
+       EGLContext itself.) */
     if (sPrSdlSwap ? SDL_GL_MakeCurrent(sWin, (SDL_GLContext)sE.ctxP) != 0 : !sE.MakeCurrent(sE.dpy, sE.surf, sE.surf, sE.ctxP)) {
         R36_LogLine("r36 gl: the present thread's context not made current: %s\n", SDL_GetError());
         return NULL;

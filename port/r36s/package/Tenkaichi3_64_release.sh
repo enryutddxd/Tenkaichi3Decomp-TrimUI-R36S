@@ -42,7 +42,7 @@ export R36_PROF=0   # (no prof.txt: the test builds' measurements off)
 unset SDL_BLITTER_DISABLED
 # (the pictures put on the screen by the render thread itself: with a thread of their own the screen stayed black,
 # through EGL (test 1) and through SDL (test 7). bt3.txt present=1 to try it)
-# (test 21: made current through SDL on its thread, as the other R36S port of the game does: on; bt3.txt present=0 off)
+# (test 21: made current through SDL on its thread: on; bt3.txt present=0 off)
 grep -q '^present=0' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_PRESENT=0 || export R36_PRESENT=1
 # (bt3.txt vsync=0: the swap not held to the screen's refresh; read here, the program reads bt3.txt after the window is made)
 grep -q '^vsync=0' "$GAMEDIR/bt3.txt" 2>/dev/null && export R36_VSYNC=0
