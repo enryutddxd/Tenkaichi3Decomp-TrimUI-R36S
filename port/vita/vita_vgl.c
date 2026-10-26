@@ -4713,6 +4713,19 @@ static inline void brk_note(const State *a, const State *b) {
     if ((m & ~256u) == 1) { gVitaBrk[15]++; }
     gVitaBrk[14]++;
 }
+/* (test 33) A GS primitive whose every vertex has alpha 0, its source alpha then 0 (modulate: the texture's times
+   the vertex's; decal keeping the vertex's; no texture), with an alpha test that 0 fails and FAIL = KEEP (state_of
+   only sets atest so): the GS writes nothing for it, colour, alpha or depth. Left out. The planet's explosion
+   (EftBurst) draws each of its ~1500 pieces twice, the second pass with alpha 0 and TEST GREATER 0: the two passes
+   alternated texture and mask, ~3000 draws a picture, 2 fps. bt3.txt a0skip=0: drawn as before. */
+int gVitaA0Skip = 1;
+unsigned gVitaA0N; /* (for the log) primitives left out so */
+static inline int a0_fails(int f, int ref) {
+    return f == 0 || (f == 2 && ref == 0) || (f == 4 && ref != 0) || (f == 5 && ref > 0) || f == 6 || (f == 7 && ref == 0);
+}
+static inline int a0_on(const State *d) {
+    return gVitaA0Skip && d->atest && (!d->tme || d->env != 1) && a0_fails(d->afunc, d->aref);
+}
 static inline void qlin_merge(State *d) {
     if (gVitaQlinMerge && sHaveState && d->qlin != sCur.qlin && sVsNP != 0) {
         uint8_t q = d->qlin;
@@ -5036,6 +5049,16 @@ static void GsGpu_Draw_impl(int type, int ctx, const GsVertex *v) {
         return; /* (no blended GS triangles, so that the fighters are seen) */
     }
 page_draw:
+    if (a0_on(&d)) {
+        int k, z = 1;
+        for (k = 0; k < n; k++) {
+            z &= v[k].a == 0;
+        }
+        if (z) {
+            gVitaA0N++;
+            return;
+        }
+    }
     if (sVsNP != 0 && sNoProj && d.tme && type == 3 && !fst) {
         /* Q the same at the three corners: w the same, and the chip's interpolation with perspective is the GS's
            straight one. Only where it differs is the colour carried across the screen (a division per pixel). */
@@ -5269,6 +5292,7 @@ void GsGpu_DrawTriRun(int ctx, const GsVertex *v, uint32_t ntri) {
     int tcOn = (gVitaZoneOn & 1) != 0;
     int lean = 0, gouraud = 0, sopOn = 0, amOn = 0, skipOn = 0, qlinOn = 0, ztype = 0;
     int inBatch = 0, lastSop = -1, lastQlin = -1; /* the triangle before went into the batch drawn now with these */
+    int a0On = 0; /* (a0_on: the run's triangles with alpha 0 left out) */
     float sx0 = 0.0f, sx1 = 0.0f, sy0 = 0.0f, sy1 = 0.0f, zmax = 0.0f;
     uint64_t prim = 0, t0 = 0;
     State d0;
@@ -5336,6 +5360,7 @@ void GsGpu_DrawTriRun(int ctx, const GsVertex *v, uint32_t ntri) {
             amOn = (d0.mask & 8) != 0;
             skipOn = d0.blend && d0.eq == 0 && d0.src == 2 && (d0.dst == 3 || d0.dst == 1) && !d0.zwrite && (!d0.tme || d0.env != 1) && !(gVglSafe & 2097152);
             qlinOn = sVsNP != 0 && sNoProj && d0.tme;
+            a0On = a0_on(&d0);
             sx0 = (float)(sc & 0x7FF); sx1 = (float)((sc >> 16) & 0x7FF) + 1.0f; sy0 = (float)((sc >> 32) & 0x7FF); sy1 = (float)((sc >> 48) & 0x7FF) + 1.0f;
             ztype = (int)((gGs.zbuf[ctx] >> 24) & 15);
             zmax = ztype == 0 ? 4294967295.0f : ztype == 1 ? 16777215.0f : 65535.0f;
@@ -5346,6 +5371,10 @@ void GsGpu_DrawTriRun(int ctx, const GsVertex *v, uint32_t ntri) {
         sTexXf = 0;
         gVitaFl[0]++;
         TC(0);
+        if (a0On && v[0].a == 0 && v[1].a == 0 && v[2].a == 0) {
+            gVitaA0N++;
+            continue;
+        }
         /* the bookkeeping (fl_book) */
         if (VITA_RARE(gVitaFilm > 0)) {
             fl_sig(&d, v, t0, ctx, 3);

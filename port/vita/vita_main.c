@@ -1131,6 +1131,9 @@ static void read_settings(void) {
         } else if (strcmp(line, "snapsame") == 0) { /* 0: every image the lists refer to copied at the handover, as earlier versions */
             extern int gVitaSnapSame;
             gVitaSnapSame = atoi(eq);
+        } else if (strcmp(line, "a0skip") == 0) { /* 0: GS primitives of alpha 0 that an alpha test throws away drawn anyway, as before test 33 */
+            extern int gVitaA0Skip;
+            gVitaA0Skip = atoi(eq);
         } else if (strcmp(line, "qlinmerge") == 0) { /* 0: a GS triangle differing from the batch only in qlin begins a batch of its own, as before test 29 */
             extern int gVitaQlinMerge;
             gVitaQlinMerge = atoi(eq);

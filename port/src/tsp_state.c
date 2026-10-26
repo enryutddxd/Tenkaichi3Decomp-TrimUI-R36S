@@ -58,6 +58,13 @@ void R36_GameState(FILE *f) {
         pm = gVitaQlinMerged;
     }
     {
+        extern unsigned gVitaA0N;
+        extern int gVitaA0Skip;
+        static unsigned pz;
+        fprintf(f, "  GS primitives of alpha 0 an alpha test throws away, left out: %s, %u\n", gVitaA0Skip ? "on" : "off", gVitaA0N - pz);
+        pz = gVitaA0N;
+    }
+    {
         extern unsigned gVitaBrk[16];
         static unsigned pb[16];
         static const char *kN[11] = {"texture", "kind/env", "filter/wrap", "blend", "alpha test", "depth", "mask/fba", "stencil/date", "qlin", "target", "scissor"};
