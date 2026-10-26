@@ -2697,7 +2697,7 @@ static void present_post(int b, GLuint tex, int w, int h, float aspect) {
     pthread_mutex_unlock(&sPrLock);
 }
 /* (render context) buffer b about to be drawn into: not while it is shown */
-#ifdef PORT_R36S64 /* (test 26: with the present thread on, 15-40 % of the pictures drawn were dropped, test 24: drawn, not seen, heat for nothing) */
+#if defined(PORT_R36S64) || defined(PORT_TSP) /* (test 26: with the present thread on, 15-40 % of the pictures drawn were dropped, test 24: drawn, not seen, heat for nothing) */
 int gR36NoDrop = 1;
 #else
 int gR36NoDrop = 0; /* every picture shown, in turn (a queue of two at most): none dropped for a newer one */

@@ -1,4 +1,4 @@
-Dragon Ball Z: Budokai Tenkaichi 3 — TrimUI Smart Pro (sistema stock + PortMaster)
+Dragon Ball Z: Budokai Tenkaichi 3 — TrimUI Smart Pro (sistema stock + PortMaster) — v1.1
 ==========================================================================
 
 ESPAÑOL
@@ -6,6 +6,12 @@ ESPAÑOL
 Port nativo (64 bits, aarch64) para la TrimUI Smart Pro del port de PS Vita Tenkaichi3Decomp-Vita, que viene de
 Tenkaichi3Decomp (z3xox) y la decompilación BT3-Decompiled. No es un emulador. NO incluye datos del juego:
 necesitas tu propio disco USA (SLUS-21678).
+
+Novedades de la v1.1
+  - Gran Saiyaman (Gohan y Videl) y Goku GT SSJ3 ya no cierran el juego.
+  - Ya no se pone lento tras varios minutos de pelea (el espacio de los personajes en la GPU se llenaba).
+  - La explosión del planeta ya no se pone lenta.
+  - Todas las imágenes dibujadas se muestran (antes se descartaban algunas): más fluido y menos calor.
 
 Instalación (en la tarjeta SD)
   1. Copia el contenido del zip a la raíz de la tarjeta:
@@ -36,11 +42,14 @@ Ajustes opcionales en Data/ports/bt3/bt3.txt (una línea por ajuste):
   glowhalf=0       el brillo calculado en cada imagen (más lento)
   wide=0          imagen 4:3 en el centro
   vsync=0         sin esperar el refresco de pantalla
+  nodrop=0        como en la v1.0: una imagen nueva reemplaza a la que no se mostró aún
+  a0skip=0        sin omitir las piezas invisibles de algunos efectos (la explosión del planeta, más lenta)
 
 ENGLISH
 -------
 A native 64-bit port for the TrimUI Smart Pro (stock system, PortMaster). Not an emulator; NO game data
-included: you need your own USA disc (SLUS-21678). TEST BUILD.
+included: you need your own USA disc (SLUS-21678). v1.1: Great Saiyaman (Gohan, Videl) and Goku GT SSJ3 no longer
+quit the game; no more slowdown after minutes of a fight, nor in the planet's explosion; every picture drawn is shown.
 Install: copy the zip's contents to the root of the SD card (Roms/PORTS/ and Data/ports/bt3/), then copy
 SLUS_216.78 and the BIN and DATA folders of your own disc image to Data/ports/bt3/disc/. Start it from Ports.
 START + SELECT held for two seconds quits. On a problem, send log.txt, err.txt, launcher.txt and crash.txt.
@@ -56,6 +65,8 @@ CRÉDITOS / CREDITS
     The PS Vita port this is built on (renderer, system layer, options): arielxflores.
   - Port de PC Tenkaichi3Decomp: z3xox y colaboradores — https://github.com/z3xox/Tenkaichi3Decomp
     The Tenkaichi3Decomp PC port: z3xox and contributors.
+    (De ahí viene también la traducción a C de ObjSeam_TransformVtx, la "costura" de algunos personajes.
+     Upstream's C translation of ObjSeam_TransformVtx comes from there too.)
   - La decompilación BT3-Decompiled y sus autores. / The BT3-Decompiled decompilation and its authors.
   - Spike / Bandai Namco: Dragon Ball Z: Budokai Tenkaichi 3, el juego original (sus derechos son de sus dueños).
     Spike / Bandai Namco: the original game (its rights belong to its owners).
