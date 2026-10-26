@@ -51,6 +51,13 @@ void R36_GameState(FILE *f) {
         memcpy(pa, gVitaAClr, sizeof(pa));
     }
     {
+        extern unsigned gVitaQlinMerged;
+        extern int gVitaQlinMerge;
+        static unsigned pm;
+        fprintf(f, "  GS triangles kept in the batch but for their Q (drawn the qlin way): %s, %u batches made so\n", gVitaQlinMerge ? "on" : "off", gVitaQlinMerged - pm);
+        pm = gVitaQlinMerged;
+    }
+    {
         extern unsigned gR36Pool[3];
         static unsigned pq[3];
         fprintf(f, "  texture pool: %u taken from it, %u kept, %u made new\n", gR36Pool[0] - pq[0], gR36Pool[1] - pq[1], gR36Pool[2] - pq[2]);

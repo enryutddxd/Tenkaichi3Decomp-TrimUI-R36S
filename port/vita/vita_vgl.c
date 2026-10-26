@@ -1822,6 +1822,13 @@ static unsigned sProfN[PROF_MODES];
 static float sProfQlin; /* the picture's GS triangles with the colour across the screen (area) */
 int gVitaGpuProf, gVitaGpuProfFrom = 1450, gVitaGpuProfTo = 2150; /* bt3.txt gpuprof=1, gpuproffrom=, gpuprofto= (lists) */
 int gVitaQlinOpt = 1; /* bt3.txt qlinopt=0: as an earlier version (every GS triangle whose Q differs: the full-precision division) */
+/* (R36S test 29) A GS triangle that differs from the batch being filled only in qlin goes on in it, the batch then
+   drawn the qlin way (kVertNP, flag 16). That way gives a triangle whose Q is the same at its corners the same
+   colour: its vertices carry q = w x sQn (or 1, written before the batch became qlin) and the colour is divided by
+   it again per pixel, a constant. A planet's explosion alternated the two ways triangle by triangle (0:3d, 0:6d):
+   ~700 draws a picture, 6-7 fps. bt3.txt qlinmerge=0: not. */
+int gVitaQlinMerge = 1;
+unsigned gVitaQlinMerged; /* (for the log) */
 static struct { int16_t k; uint16_t n; float area; } sRun[320]; /* the sampled picture's draws in order: runs of a state (k >= 0), or models (-1 kept parts and fighters, -2 batches) */
 static int sRunN;
 static void run_add(int k, int n, float area) {
@@ -4686,6 +4693,19 @@ static int fl_book(State *dp, int ctx, const GsVertex *v, int gouraud, uint64_t 
     }
     return 1;
 }
+static inline void qlin_merge(State *d) {
+    if (gVitaQlinMerge && sHaveState && d->qlin != sCur.qlin && sVsNP != 0) {
+        uint8_t q = d->qlin;
+        d->qlin = sCur.qlin;
+        if (memcmp(d, &sCur, sizeof(*d)) == 0) {
+            sCur.qlin = 1; /* (the batch the qlin way from now on: its vertices so far have q = 1, the same colour) */
+            d->qlin = 1;
+            gVitaQlinMerged++;
+        } else {
+            d->qlin = q;
+        }
+    }
+}
 static void GsGpu_Draw_impl(int type, int ctx, const GsVertex *v) {
     uint64_t prim = gGs.prim, t0 = gGs.tex0[ctx];
     int fst = (prim >> 8) & 1, gouraud = (prim >> 3) & 1, n = type == 6 ? 2 : type == 3 ? 3 : type == 1 ? 2 : 1, i;
@@ -5050,6 +5070,7 @@ page_draw:
         if (sAgN > 0) {
             ag_close();
         }
+        qlin_merge(&d);
         if (!sHaveState || memcmp(&d, &sCur, sizeof(d)) != 0 || sVertCount + 6 > MAX_VERTS) {
             ZM(15);
             flush();
@@ -5367,7 +5388,10 @@ void GsGpu_DrawTriRun(int ctx, const GsVertex *v, uint32_t ntri) {
             ag_close();
             inBatch = 0;
         }
-        if (inBatch && d.sop == lastSop && d.qlin == lastQlin && sHaveState && sVertCount + 6 <= MAX_VERTS) {
+        if (inBatch && d.sop == lastSop && d.qlin != lastQlin && sHaveState && sCur.qlin != d.qlin) {
+            qlin_merge(&d); /* (the batch of the triangle before, but for qlin: on in it, the qlin way) */
+        }
+        if (inBatch && d.sop == lastSop && (d.qlin == lastQlin || d.qlin == sCur.qlin) && sHaveState && sVertCount + 6 <= MAX_VERTS) {
             /* the batch of the triangle before: d is that one's state but for these two, compared */
         } else if (!sHaveState || memcmp(&d, &sCur, sizeof(d)) != 0 || sVertCount + 6 > MAX_VERTS) {
             run_am_lay();
