@@ -5,8 +5,8 @@
 >
 > | Handheld | System | Resolution | Fights | Download |
 > |---|---|---|---|---|
-> | TrimUI Smart Pro | stock firmware | 854x480 | ~29-30 fps | `Tenkaichi3Decomp-TrimUI-v1.1.zip` |
-> | R36S (RK3326, Mali-G31) | ArkOS / dArkOS | 640x480 | ~29 fps | `Tenkaichi3Decomp-R36S-64bit-v1.1.zip` |
+> | TrimUI Smart Pro | CrossMix | 854x480 | ~29-30 fps | `Tenkaichi3Decomp-TrimUI-v1.1.zip` |
+> | R36S (RK3326, Mali-G31) | dArkOS RE | 640x480 | ~29 fps | `Tenkaichi3Decomp-R36S-64bit-v1.1.zip` |
 >
 > Both are on the [releases page](https://github.com/enryutddxd/Tenkaichi3Decomp-TrimUI/releases); see
 > [port/trimui/README.md](port/trimui/README.md) and [port/r36s/README.md](port/r36s/README.md). No game data
