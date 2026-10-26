@@ -5,15 +5,15 @@ ESPAÑOL
 -------
 Port nativo de 64 bits para la R36S (y otras consolas RK3326 con ArkOS) del decomp Tenkaichi3Decomp, basado en
 el port de PS Vita de arielxflores. No es un emulador. NO incluye datos del juego: necesitas tu propio disco USA
-(SLUS-21678). Peleas a 25-30 fps a 640x480 (26-28 lo normal), estables en sesiones largas.
+(SLUS-21678). Peleas a 28-30 fps a 640x480 (29 de media en 37 minutos), estables en sesiones largas.
 
 Novedades de la v1.1
   - Ya no cae a 4-7 fps tras varios minutos de pelea.
   - Gran Saiyaman (Gohan y Videl) y Goku GT SSJ3 ya no cierran el juego.
   - Ya no se cierra solo tras ~25 minutos (la memoria del driver de la GPU crecía sin parar).
   - Las imágenes se ponen en pantalla desde un hilo propio y se muestran todas: más fluido.
-  - Menos calor: CPU limitada a 1200 MHz y GPU a 400 MHz (en pelea el sistema las bajaba a eso de todos modos);
-    la consola se queda en ~80 °C en vez de 85-88.
+  - Menos calor: CPU limitada a 1200 MHz (en pelea el sistema la bajaba a eso de todos modos); la consola se
+    queda en ~80 °C en vez de 85-88.
 
 Instalación
   1. Copia el contenido del zip a la carpeta "ports" de la tarjeta (en ArkOS: roms/ports):
@@ -35,17 +35,17 @@ Ajustes opcionales en ports/bt3_64/bt3.txt (una línea por ajuste, sin espacios)
   fxtbl=0          sin niebla ni ajustes de color
   fxol=0           sin el contorno de los personajes
   cpumax=1512      otra velocidad máxima de la CPU en MHz (1008, 1200, 1248, 1296, 1512; 0 = sin límite)
-  gpumax=520       otra velocidad máxima de la GPU en MHz (400, 480, 520; 0 = sin límite)
+  gpumax=400       velocidad máxima de la GPU en MHz (400, 480, 520; sin límite por defecto; a 400, ~3 fps menos)
   present=0        la imagen puesta en pantalla por el hilo de dibujo, como en la v1.0
 
 ENGLISH
 -------
 A native 64-bit port for the R36S (and other RK3326 handhelds on ArkOS) of the Tenkaichi3Decomp decompilation,
 built on arielxflores' PS Vita port. Not an emulator; NO game data included: you need your own USA disc
-(SLUS-21678). Fights at 25-30 fps at 640x480 (26-28 typical), steady over long sessions.
+(SLUS-21678). Fights at 28-30 fps at 640x480 (29 on average over 37 minutes), steady over long sessions.
 v1.1: no more drops to 4-7 fps in long fights; Great Saiyaman (Gohan, Videl) and Goku GT SSJ3 no longer quit the
 game; no more quitting after ~25 minutes (the GPU driver's memory grew without end); pictures shown from a thread
-of their own, every one of them; less heat (CPU held at 1200 MHz, GPU at 400 MHz; bt3.txt cpumax=, gpumax=).
+of their own, every one of them; less heat (CPU held at 1200 MHz; bt3.txt cpumax=, gpumax=).
 Install: copy the zip's contents to the card's "ports" folder (ArkOS: roms/ports), then copy SLUS_216.78 and the
 BIN and DATA folders of your own disc to ports/bt3_64/disc/ (or keep them in the 32-bit version's ports/bt3/disc/).
 Start it from Ports. START + SELECT held for two seconds quits.

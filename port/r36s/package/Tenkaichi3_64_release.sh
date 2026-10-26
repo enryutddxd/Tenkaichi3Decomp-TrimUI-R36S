@@ -67,9 +67,9 @@ done
 # brings them there anyway after a few minutes (test 22: 1008 / 400 MHz from minute 12, 22-28 fps, the chip still
 # climbing to 88 C); held lower from the start, the chip runs cooler and the speed steadier. Only the top is
 # lowered: the system's own heat limits stay as they are. bt3.txt cpumax=<MHz> (1008, 1200, 1248, 1296, 1512),
-# gpumax=<MHz> (400, 480, 520); 0 = no cap.
+# gpumax=<MHz> (400, 480, 520); 0 = no cap (the default since test 28: at 520 MHz 29.1 fps against 26.5, as hot).
 CPUMAX=$(sed -n 's/^cpumax=\([0-9]*\).*/\1/p' "$GAMEDIR/bt3.txt" 2>/dev/null | tail -1); CPUMAX=${CPUMAX:-1200}
-GPUMAX=$(sed -n 's/^gpumax=\([0-9]*\).*/\1/p' "$GAMEDIR/bt3.txt" 2>/dev/null | tail -1); GPUMAX=${GPUMAX:-400}
+GPUMAX=$(sed -n 's/^gpumax=\([0-9]*\).*/\1/p' "$GAMEDIR/bt3.txt" 2>/dev/null | tail -1); GPUMAX=${GPUMAX:-0}
 declare -A OLDMAX
 if [ "$CPUMAX" -gt 0 ]; then
   for f in /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq; do
