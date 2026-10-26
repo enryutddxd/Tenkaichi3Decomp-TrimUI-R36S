@@ -2570,6 +2570,7 @@ static void *present_thread(void *arg) {
         sPrQn--;
         j = sPrJob[b];
         sPb[b].state = PB_SHOWING;
+        pthread_cond_broadcast(&sPrCond); /* (taken: the drawing thread may hand over the next, nodrop 1) */
         pthread_mutex_unlock(&sPrLock);
         if (j.ready != NULL) {
             p_glWaitSync(j.ready, 0, GL_TIMEOUT_IGNORED);
@@ -2685,6 +2686,24 @@ static void present_post(int b, GLuint tex, int w, int h, float aspect) {
     int k;
     p_glFlush();
     pthread_mutex_lock(&sPrLock);
+    if (gR36NoDrop == 1 && sPrQn > 0) {
+        /* (nodrop 1: one picture waiting at most. With two in the queue the screen showed the game up to two
+           pictures late, 33-66 ms more between a button and what it does, felt in a fight: the drawing thread waits
+           here for the present thread to take the one before, at most 100 ms. nodrop=2: two, as tests 26-33) */
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_nsec += 100000000L;
+        if (ts.tv_nsec >= 1000000000L) {
+            ts.tv_sec++;
+            ts.tv_nsec -= 1000000000L;
+        }
+        while (sPrQn > 0) {
+            gR36Present[2]++;
+            if (pthread_cond_timedwait(&sPrCond, &sPrLock, &ts) != 0) {
+                break;
+            }
+        }
+    }
     for (k = 0; k < sPrQn && !gR36NoDrop; k++) { /* (a newer picture: the older ones not shown) */
         int o = sPrQ[k];
         if (sPrJob[o].ready != NULL) {

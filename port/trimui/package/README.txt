@@ -43,7 +43,7 @@ Ajustes opcionales en Data/ports/bt3/bt3.txt (una línea por ajuste):
   glowhalf=0       el brillo calculado en cada imagen (más lento)
   wide=0          imagen 4:3 en el centro
   vsync=0         sin esperar el refresco de pantalla
-  nodrop=0        como en la v1.0: una imagen nueva reemplaza a la que no se mostró aún
+  nodrop=0        como en la v1.0: una imagen nueva reemplaza a la que no se mostró aún (menos retraso, menos fluido)
   a0skip=0        sin omitir las piezas invisibles de algunos efectos (la explosión del planeta, más lenta)
 
 ENGLISH
