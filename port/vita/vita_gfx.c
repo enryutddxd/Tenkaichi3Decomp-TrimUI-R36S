@@ -89,7 +89,11 @@ int Port_PadRead(int socket, unsigned char *data) {
         if (x & 1) { btn |= B_L2; }
         if (x & 2) { btn |= B_R2; }
         if ((x & 4) || (sel && l)) { btn |= 0x0002; } /* L3 */
+#ifdef PORT_TSP
+        if ((x & 8) || (x & 16) || (sel && r)) { btn |= 0x0004; } /* R3 (the TrimUI: its sticks do not click; its MENU button, SDL's guide) */
+#else
         if ((x & 8) || (sel && r)) { btn |= 0x0004; } /* R3 */
+#endif
         if (sel && !l && !r) { btn |= B_SELECT; }
         if (!sel && l) { btn |= B_L1; }
         if (!sel && r) { btn |= B_R1; }

@@ -26,7 +26,8 @@ Instalación (en la tarjeta SD)
 
 Controles (por posición, como en PS2)
   Botón de abajo = X · derecha = Círculo · izquierda = Cuadrado · arriba = Triángulo
-  L1 / R1 = L1 / R1 · L2 / R2 = L2 / R2 · sticks = sticks (L3 / R3 al presionarlos)
+  L1 / R1 = L1 / R1 · L2 / R2 = L2 / R2 · sticks = sticks
+  MENU = R3 · SELECT + L1 = L3 · SELECT + R1 = R3
   START + SELECT durante 2 segundos: salir del juego
 
 Si algo falla, mándame estos archivos de Data/ports/bt3/:
