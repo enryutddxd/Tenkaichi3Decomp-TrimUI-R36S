@@ -141,6 +141,16 @@ void HistSel_Init(s32 section) {
     s32 j;
     s32 cleared;
 
+#ifdef PORT_R36S
+    /* (the port) a save from a build with the unlock bug (menu_c_c.c HistResult_BuildRewards): a sub menu given an
+       episode but never listed. The game lists a sub menu whenever it gives one of its episodes, so one with an
+       episode and not listed can only be that: listed here, as new. */
+    for (i = 0; i < SAVE_SLOT_COUNT; i++) {
+        if (MSAVE->slot[i].val[0] != 0 && !(MSAVE->slot[i].flags & MSLOT_LISTED)) {
+            MSAVE->slot[i].flags |= MSLOT_LISTED | MSLOT_NEW;
+        }
+    }
+#endif
     gHistSel = Heap_Alloc(0x254, 0x20, 0, 2);
     memset(gHistSel, 0, 0x254);
     gHistSel->pack = (u32 *)MPACK_AT(gMenuArc2, section);
