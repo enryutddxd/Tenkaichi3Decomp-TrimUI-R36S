@@ -1,11 +1,26 @@
-# Tenkaichi3Decomp for the TrimUI Smart Pro (and PS Vita)
+# Tenkaichi3Decomp for the TrimUI Smart Pro and the R36S (and PS Vita)
 
-> **TrimUI Smart Pro port (stock firmware, PortMaster) by EnryuTG.** This fork adds a native 64-bit Linux port for
-> the TrimUI Smart Pro (`port/r36s`, `port/trimui`): an OpenGL ES layer for its PowerVR GPU, a render thread and
-> many optimisations; fights run at about 30 fps at 854x480. Download the zip from the
-> [releases page](https://github.com/enryutddxd/Tenkaichi3Decomp-TrimUI/releases) and see
-> [port/trimui/README.md](port/trimui/README.md). No game data included: you need your own USA disc (SLUS-21678).
-> Based on [arielxflores' PS Vita port](https://github.com/arielxflores/Tenkaichi3Decomp-Vita); its README follows.
+> **TrimUI Smart Pro and R36S ports by EnryuTG.** This fork adds native 64-bit Linux ports of *Dragon Ball Z:
+> Budokai Tenkaichi 3* for two handhelds, both started from PortMaster:
+>
+> | Handheld | System | Resolution | Fights | Download |
+> |---|---|---|---|---|
+> | TrimUI Smart Pro | stock firmware | 854x480 | ~29-30 fps | `Tenkaichi3Decomp-TrimUI-v1.1.zip` |
+> | R36S (RK3326, Mali-G31) | ArkOS / dArkOS | 640x480 | ~29 fps | `Tenkaichi3Decomp-R36S-64bit-v1.1.zip` |
+>
+> Both are on the [releases page](https://github.com/enryutddxd/Tenkaichi3Decomp-TrimUI/releases); see
+> [port/trimui/README.md](port/trimui/README.md) and [port/r36s/README.md](port/r36s/README.md). No game data
+> included: you need your own USA disc (SLUS-21678). They are built from this repository (`port/r36s/build.py`,
+> `BT3_PLATFORM=tsp` or `r36s64`): an OpenGL ES 3 layer on SDL2 for the PowerVR and Mali GPUs (`port/r36s/shim`),
+> a render thread and many optimisations for the two chips.
+>
+> **Credits:** EnryuTG (TrimUI and R36S ports, with Claude by Anthropic) · [arielxflores](https://github.com/arielxflores/Tenkaichi3Decomp-Vita)
+> (the PS Vita port these are built on: renderer, system layer, options) · [z3xox and contributors](https://github.com/z3xox/Tenkaichi3Decomp)
+> (Tenkaichi3Decomp, the PC port; also the C translation of `ObjSeam_TransformVtx`) · the BT3-Decompiled
+> decompilation and its authors · Rinnegatamante (vitaGL, whose interface the GL layer follows) · the SDL team,
+> Khronos, PortMaster. *Dragon Ball Z: Budokai Tenkaichi 3* is Spike / Bandai Namco's; its rights belong to its owners.
+>
+> Licence: GNU AGPL v3, as the Vita port (the earlier MIT part's notice kept). The Vita port's README follows.
 
 # Tenkaichi3Decomp for the PS Vita
 

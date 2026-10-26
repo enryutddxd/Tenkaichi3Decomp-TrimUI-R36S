@@ -1,5 +1,13 @@
 # port/r36s
 
+**The 64-bit version (v1.1, the one released):** `BT3_PLATFORM=r36s64 python3 port/r36s/build.py` (add
+`BT3_RELEASE=1` for the release package, without the measurements) gives `port/build/r36s64/`, the `ports/bt3_64`
+folder and its launcher. It is the TrimUI Smart Pro's build (`BT3_PLATFORM=tsp`) for the R36S's Mali-G31: uniform
+blocks in a persistently mapped stream, draws given their index range (the Mali driver's memory), the swap on a
+thread of its own (made current through SDL on KMSDRM), the CPU held at 1200 MHz. The player's README is
+`package/README_64.txt`; what was measured is in the commit history (tests 1 to 33). The rest of this file is
+about the first, 32-bit version.
+
 The R36S version of the port: the PS Vita version (port/vita) built for the RK3326 handhelds (R36S and similar) on
 ArkOS / dArkOSRE, a 32-bit ARM Linux program on SDL2 and OpenGL ES 3 (the Mali-G31).
 
