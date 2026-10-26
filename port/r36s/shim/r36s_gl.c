@@ -30,6 +30,7 @@
 #include <string.h>
 #include <time.h>
 #include <dlfcn.h>
+#include <dirent.h>
 #include <math.h>
 #include "vitaGL.h"
 
@@ -425,7 +426,22 @@ void R36_GlTimes(FILE *f, double secs) {
                     if (fgets(v, sizeof(v), g) != NULL) { cpu = atol(v) / 1000; }
                     fclose(g);
                 }
-                if ((g = fopen("/sys/class/devfreq/ff400000.gpu/cur_freq", "r")) != NULL) {
+                static char gpuPath[128];
+                if (gpuPath[0] == 0) { /* (the GPU's devfreq: the R36S's ff400000.gpu, or the first whose name says gpu) */
+                    DIR *dd = opendir("/sys/class/devfreq");
+                    struct dirent *de;
+                    snprintf(gpuPath, sizeof(gpuPath), "/sys/class/devfreq/ff400000.gpu/cur_freq");
+                    while (dd != NULL && (de = readdir(dd)) != NULL) {
+                        if (strstr(de->d_name, "gpu") != NULL || strstr(de->d_name, "GPU") != NULL) {
+                            snprintf(gpuPath, sizeof(gpuPath), "/sys/class/devfreq/%s/cur_freq", de->d_name);
+                            break;
+                        }
+                    }
+                    if (dd != NULL) {
+                        closedir(dd);
+                    }
+                }
+                if ((g = fopen(gpuPath, "r")) != NULL) {
                     if (fgets(v, sizeof(v), g) != NULL) { gpu = atol(v) / 1000000; }
                     fclose(g);
                 }
