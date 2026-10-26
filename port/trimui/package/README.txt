@@ -1,4 +1,4 @@
-Dragon Ball Z: Budokai Tenkaichi 3 — TrimUI Smart Pro (sistema stock + PortMaster) — v1.1
+Dragon Ball Z: Budokai Tenkaichi 3 — TrimUI Smart Pro (CrossMix + PortMaster) — v1.2
 ==========================================================================
 
 ESPAÑOL
@@ -6,6 +6,10 @@ ESPAÑOL
 Port nativo (64 bits, aarch64) para la TrimUI Smart Pro del port de PS Vita Tenkaichi3Decomp-Vita, que viene de
 Tenkaichi3Decomp (z3xox) y la decompilación BT3-Decompiled. No es un emulador. NO incluye datos del juego:
 necesitas tu propio disco USA (SLUS-21678).
+
+Novedades de la v1.2
+  - L1 + R1 a la vez = L3, y el botón MENU = R3 (los sticks de la TrimUI no se presionan).
+  - Menos retraso entre los botones y la pantalla (máximo una imagen en espera).
 
 Novedades de la v1.1
   - Gran Saiyaman (Gohan y Videl) y Goku GT SSJ3 ya no cierran el juego.
@@ -27,7 +31,7 @@ Instalación (en la tarjeta SD)
 Controles (por posición, como en PS2)
   Botón de abajo = X · derecha = Círculo · izquierda = Cuadrado · arriba = Triángulo
   L1 / R1 = L1 / R1 · L2 / R2 = L2 / R2 · sticks = sticks
-  MENU = R3 · SELECT + L1 = L3 · SELECT + R1 = R3
+  L1 + R1 a la vez = L3 · MENU = R3
   START + SELECT durante 2 segundos: salir del juego
 
 Si algo falla, mándame estos archivos de Data/ports/bt3/:
@@ -49,7 +53,8 @@ Ajustes opcionales en Data/ports/bt3/bt3.txt (una línea por ajuste):
 ENGLISH
 -------
 A native 64-bit port for the TrimUI Smart Pro (stock system, PortMaster). Not an emulator; NO game data
-included: you need your own USA disc (SLUS-21678). v1.1: Great Saiyaman (Gohan, Videl) and Goku GT SSJ3 no longer
+included: you need your own USA disc (SLUS-21678). v1.2: L1 + R1 together = L3, MENU = R3; less delay between
+the buttons and the screen. v1.1: Great Saiyaman (Gohan, Videl) and Goku GT SSJ3 no longer
 quit the game; no more slowdown after minutes of a fight, nor in the planet's explosion; every picture drawn is shown.
 Install: copy the zip's contents to the root of the SD card (Roms/PORTS/ and Data/ports/bt3/), then copy
 SLUS_216.78 and the BIN and DATA folders of your own disc image to Data/ports/bt3/disc/. Start it from Ports.

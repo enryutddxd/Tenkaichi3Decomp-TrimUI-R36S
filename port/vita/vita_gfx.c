@@ -88,15 +88,21 @@ int Port_PadRead(int socket, unsigned char *data) {
         int sel = (pad.buttons & SCE_CTRL_SELECT) != 0, l = (pad.buttons & SCE_CTRL_LTRIGGER) != 0, r = (pad.buttons & SCE_CTRL_RTRIGGER) != 0;
         if (x & 1) { btn |= B_L2; }
         if (x & 2) { btn |= B_R2; }
-        if ((x & 4) || (sel && l)) { btn |= 0x0002; } /* L3 */
 #ifdef PORT_TSP
-        if ((x & 8) || (x & 16) || (sel && r)) { btn |= 0x0004; } /* R3 (the TrimUI: its sticks do not click; its MENU button, SDL's guide) */
+        /* the TrimUI: its sticks do not click. L1 + R1 together = L3 (then neither L1 nor R1), MENU (SDL's guide) = R3;
+           SELECT is SELECT alone */
+        if ((x & 4) || (l && r)) { btn |= 0x0002; } /* L3 */
+        if ((x & 8) || (x & 16)) { btn |= 0x0004; } /* R3 */
+        if (sel) { btn |= B_SELECT; }
+        if (l && !r) { btn |= B_L1; }
+        if (r && !l) { btn |= B_R1; }
 #else
+        if ((x & 4) || (sel && l)) { btn |= 0x0002; } /* L3 */
         if ((x & 8) || (sel && r)) { btn |= 0x0004; } /* R3 */
-#endif
         if (sel && !l && !r) { btn |= B_SELECT; }
         if (!sel && l) { btn |= B_L1; }
         if (!sel && r) { btn |= B_R1; }
+#endif
     }
 #else
     if (pad.buttons & SCE_CTRL_SELECT) { /* SELECT + L / R = L2 / R2; SELECT alone = SELECT */
