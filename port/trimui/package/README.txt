@@ -1,4 +1,4 @@
-Dragon Ball Z: Budokai Tenkaichi 3 — TrimUI Smart Pro (CrossMix + PortMaster) — v1.2
+Dragon Ball Z: Budokai Tenkaichi 3 — TrimUI Smart Pro (CrossMix + PortMaster) — v1.0
 ==========================================================================
 
 ESPAÑOL
@@ -7,15 +7,10 @@ Port nativo (64 bits, aarch64) para la TrimUI Smart Pro del port de PS Vita Tenk
 Tenkaichi3Decomp (z3xox) y la decompilación BT3-Decompiled. No es un emulador. NO incluye datos del juego:
 necesitas tu propio disco USA (SLUS-21678).
 
-Novedades de la v1.2
-  - L1 + R1 a la vez = L3, y el botón MENU = R3 (los sticks de la TrimUI no se presionan).
-  - Menos retraso entre los botones y la pantalla (máximo una imagen en espera).
-
-Novedades de la v1.1
-  - Gran Saiyaman (Gohan y Videl) y Goku GT SSJ3 ya no cierran el juego.
-  - Ya no se pone lento tras varios minutos de pelea (el espacio de los personajes en la GPU se llenaba).
-  - La explosión del planeta ya no se pone lenta.
-  - Todas las imágenes dibujadas se muestran (antes se descartaban algunas): más fluido y menos calor.
+Rendimiento (medido en peleas largas)
+  - Peleas a 854x480 (escaladas a la pantalla de 1280x720): 29.2 fps de media, 28-30 fps el 89 % del tiempo.
+    Menús a 60 fps.
+  - CPU fija a 1608 MHz, sin bajar por calor. Temperatura estable en ~70 °C.
 
 Instalación (en la tarjeta SD)
   1. Copia el contenido del zip a la raíz de la tarjeta:
@@ -52,10 +47,9 @@ Ajustes opcionales en Data/ports/bt3/bt3.txt (una línea por ajuste):
 
 ENGLISH
 -------
-A native 64-bit port for the TrimUI Smart Pro (stock system, PortMaster). Not an emulator; NO game data
-included: you need your own USA disc (SLUS-21678). v1.2: L1 + R1 together = L3, MENU = R3; less delay between
-the buttons and the screen. v1.1: Great Saiyaman (Gohan, Videl) and Goku GT SSJ3 no longer
-quit the game; no more slowdown after minutes of a fight, nor in the planet's explosion; every picture drawn is shown.
+A native 64-bit port for the TrimUI Smart Pro (CrossMix, PortMaster). Not an emulator; NO game data
+included: you need your own USA disc (SLUS-21678). Fights at 854x480: 29.2 fps on average, 28-30 fps 89 % of the
+time; menus at 60 fps; CPU at 1608 MHz, ~70 °C steady. L1 + R1 together = L3, MENU = R3.
 Install: copy the zip's contents to the root of the SD card (Roms/PORTS/ and Data/ports/bt3/), then copy
 SLUS_216.78 and the BIN and DATA folders of your own disc image to Data/ports/bt3/disc/. Start it from Ports.
 START + SELECT held for two seconds quits. On a problem, send log.txt, err.txt, launcher.txt and crash.txt.
@@ -85,12 +79,12 @@ El código del port está bajo la GNU Affero General Public License v3 (LICENSE.
 que se basa; la parte anterior a ese cambio de licencia venía bajo MIT, cuyo aviso se conserva en LICENSE-MIT.txt.
 Esta versión está modificada respecto al port de Vita de arielxflores (ver créditos). Por la AGPL, el código
 fuente completo de esta versión está disponible para quien lo reciba:
-https://github.com/enryutddxd/Tenkaichi3Decomp-TrimUI
+https://github.com/enryutddxd/Tenkaichi3Decomp-TrimUI-R36S
 El código del juego viene de la decompilación; los datos del juego, de tu propio disco. Este proyecto no está
 afiliado ni respaldado por los dueños del juego.
 
 The port code is under the GNU AGPL v3 (LICENSE.txt), as the Vita port it is built on; the earlier part came under
 MIT, whose notice is kept in LICENSE-MIT.txt. This version is modified from arielxflores' Vita port. Under the
 AGPL, the complete source code of this version is available to whoever receives it:
-https://github.com/enryutddxd/Tenkaichi3Decomp-TrimUI. The game's code comes from the decompilation; the game's data from your own disc. Not affiliated
+https://github.com/enryutddxd/Tenkaichi3Decomp-TrimUI-R36S. The game's code comes from the decompilation; the game's data from your own disc. Not affiliated
 with or endorsed by the game's rights holders.
