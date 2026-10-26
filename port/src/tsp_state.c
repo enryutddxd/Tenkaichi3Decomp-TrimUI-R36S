@@ -58,6 +58,18 @@ void R36_GameState(FILE *f) {
         pm = gVitaQlinMerged;
     }
     {
+        extern unsigned gVitaBrk[16];
+        static unsigned pb[16];
+        static const char *kN[11] = {"texture", "kind/env", "filter/wrap", "blend", "alpha test", "depth", "mask/fba", "stencil/date", "qlin", "target", "scissor"};
+        int k;
+        fprintf(f, "  GS batches ended a second: %.0f (only the texture differing: %.0f); fields that differed:", (gVitaBrk[14] - pb[14]) / 10.0, (gVitaBrk[15] - pb[15]) / 10.0);
+        for (k = 0; k < 11; k++) {
+            fprintf(f, " %s %.0f;", kN[k], (gVitaBrk[k] - pb[k]) / 10.0);
+        }
+        fprintf(f, "\n");
+        memcpy(pb, gVitaBrk, sizeof(pb));
+    }
+    {
         extern unsigned gR36Pool[3];
         static unsigned pq[3];
         fprintf(f, "  texture pool: %u taken from it, %u kept, %u made new\n", gR36Pool[0] - pq[0], gR36Pool[1] - pq[1], gR36Pool[2] - pq[2]);

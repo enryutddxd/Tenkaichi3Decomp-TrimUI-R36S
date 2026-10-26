@@ -4693,6 +4693,26 @@ static int fl_book(State *dp, int ctx, const GsVertex *v, int gouraud, uint64_t 
     }
     return 1;
 }
+/* (for the log, test 30) why a GS batch ended: the fields of the state that differed from the batch's, counted;
+   [15]: only the texture differed (with qlin at most) */
+unsigned gVitaBrk[16];
+static inline void brk_note(const State *a, const State *b) {
+    unsigned m = 0;
+    if (a->tex != b->tex) m |= 1;
+    if (a->topo != b->topo || a->tme != b->tme || a->env != b->env) m |= 2;
+    if (a->linear != b->linear || a->wrapS != b->wrapS || a->wrapT != b->wrapT) m |= 4;
+    if (a->blend != b->blend || a->src != b->src || a->dst != b->dst || a->eq != b->eq) m |= 8;
+    if (a->atest != b->atest || a->afunc != b->afunc || a->aref != b->aref) m |= 16;
+    if (a->ztest != b->ztest || a->zfunc != b->zfunc || a->zwrite != b->zwrite) m |= 32;
+    if (a->mask != b->mask || a->fba != b->fba) m |= 64;
+    if (a->sop != b->sop || a->date != b->date) m |= 128;
+    if (a->qlin != b->qlin) m |= 256;
+    if (a->target != b->target) m |= 512;
+    if (a->sx != b->sx || a->sy != b->sy || a->sw != b->sw || a->sh != b->sh) m |= 1024;
+    { int k; for (k = 0; k < 11; k++) { if (m >> k & 1) { gVitaBrk[k]++; } } }
+    if ((m & ~256u) == 1) { gVitaBrk[15]++; }
+    gVitaBrk[14]++;
+}
 static inline void qlin_merge(State *d) {
     if (gVitaQlinMerge && sHaveState && d->qlin != sCur.qlin && sVsNP != 0) {
         uint8_t q = d->qlin;
@@ -5072,6 +5092,7 @@ page_draw:
         }
         qlin_merge(&d);
         if (!sHaveState || memcmp(&d, &sCur, sizeof(d)) != 0 || sVertCount + 6 > MAX_VERTS) {
+            if (sHaveState) { brk_note(&d, &sCur); }
             ZM(15);
             flush();
             ZM(30);
@@ -5394,6 +5415,7 @@ void GsGpu_DrawTriRun(int ctx, const GsVertex *v, uint32_t ntri) {
         if (inBatch && d.sop == lastSop && (d.qlin == lastQlin || d.qlin == sCur.qlin) && sHaveState && sVertCount + 6 <= MAX_VERTS) {
             /* the batch of the triangle before: d is that one's state but for these two, compared */
         } else if (!sHaveState || memcmp(&d, &sCur, sizeof(d)) != 0 || sVertCount + 6 > MAX_VERTS) {
+            if (sHaveState) { brk_note(&d, &sCur); }
             run_am_lay();
             flush();
             sCur = d;
