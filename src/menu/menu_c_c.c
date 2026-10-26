@@ -69,6 +69,13 @@ void HistResult_BuildRewards(void) {
 
     memset(gHistResult->reward, 0, 0x88);
     gHistResult->rewardCount = 0;
+#ifdef PORT_R36S
+    /* (the port) all three set before the loop below compares against them: the original sets each at its own
+       turn, so the comparison read the later ones uninitialised. On the PS2's stack they never matched a sub
+       menu; here they could, and the sub menu a won battle opens (the Frieza saga after the Saiyan saga) got its
+       episode but was never listed in the saga select. */
+    unlock[0] = unlock[1] = unlock[2] = -1;
+#endif
     for (i = 0; i < 3; i++) {
         unlock[i] = -1;
         id = prog->reward.episode[i];
