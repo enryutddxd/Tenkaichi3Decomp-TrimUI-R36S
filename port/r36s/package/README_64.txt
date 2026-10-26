@@ -10,6 +10,7 @@ el port de PS Vita de arielxflores. No es un emulador. NO incluye datos del jueg
 Novedades de la v1.1
   - Ya no cae a 4-7 fps tras varios minutos de pelea.
   - Gran Saiyaman (Gohan y Videl) y Goku GT SSJ3 ya no cierran el juego.
+  - La explosión del planeta ya no baja a 2-8 fps.
   - Ya no se cierra solo tras ~25 minutos (la memoria del driver de la GPU crecía sin parar).
   - Las imágenes se ponen en pantalla desde un hilo propio y se muestran todas: más fluido.
   - Menos calor: CPU limitada a 1200 MHz (en pelea el sistema la bajaba a eso de todos modos); la consola se
@@ -43,7 +44,7 @@ ENGLISH
 A native 64-bit port for the R36S (and other RK3326 handhelds on ArkOS) of the Tenkaichi3Decomp decompilation,
 built on arielxflores' PS Vita port. Not an emulator; NO game data included: you need your own USA disc
 (SLUS-21678). Fights at 28-30 fps at 640x480 (29 on average over 37 minutes), steady over long sessions.
-v1.1: no more drops to 4-7 fps in long fights; Great Saiyaman (Gohan, Videl) and Goku GT SSJ3 no longer quit the
+v1.1: no more drops to 4-7 fps in long fights, nor to 2-8 fps in the planet's explosion; Great Saiyaman (Gohan, Videl) and Goku GT SSJ3 no longer quit the
 game; no more quitting after ~25 minutes (the GPU driver's memory grew without end); pictures shown from a thread
 of their own, every one of them; less heat (CPU held at 1200 MHz; bt3.txt cpumax=, gpumax=).
 Install: copy the zip's contents to the card's "ports" folder (ArkOS: roms/ports), then copy SLUS_216.78 and the
